@@ -1,0 +1,51 @@
+__pycache__/
+*.pyc
+
+.DS_Store
+node_modules
+coverage
+/dist
+
+# local env files
+.env
+.env.local
+.env.*.local
+.venv/
+venv/
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor directories and files
+.idea
+.vscode
+.eslintrc
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+CLAUDE.md
+telemetry-id
+
+# --- agent pending ---
+# ignore the whole directory (anchored at repo root)
+.agent-tasks/
+.agent-tasks/**
+
+# --- unignore archive ---
+# allow Git to traverse into .agent-pending and archive
+!/.agent-tasks/
+!/.agent-tasks/archive/
+!/.agent-tasks/archive/**
+
+# --- unignore any research folder under pending/*/research ---
+# allow traversal down to research
+!/.agent-tasks/tasks/
+!/.agent-tasks/tasks/*/
+!/.agent-tasks/tasks/*/research/
+!/.agent-tasks/tasks/*/research/**
