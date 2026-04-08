@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 
 @dataclass(frozen=True)
@@ -16,14 +16,27 @@ class DailyBar:
 
 
 @dataclass(frozen=True)
+class IntradayBar:
+    symbol: str
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+
+
+@dataclass(frozen=True)
 class DipEvent:
     date: date
     dip_pct: float
     entry_price: float
+    observed_days: int
+    window_complete: bool
     max_return_pct: float
     worst_drawdown_pct: float
-    success: bool
-    days_to_target: int | None
+    historical_success: bool
+    historical_days_to_target: int | None
 
 
 @dataclass(frozen=True)
@@ -31,6 +44,8 @@ class AnalysisReport:
     symbol: str
     bar_count: int
     dip_count: int
+    resolved_dip_count: int
+    completed_window_count: int
     success_count: int
     success_rate: float
     confidence_low: float

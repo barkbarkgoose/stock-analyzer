@@ -40,7 +40,7 @@ def _parse_args() -> argparse.Namespace:
         "--rebound-window",
         type=int,
         default=5,
-        help="Look-ahead window in trading days (default: 5)",
+        help="Rebound window in trading days (default: 5)",
     )
     parser.add_argument("--csv", help="Optional local CSV path to use instead of API")
     parser.add_argument(
@@ -76,10 +76,8 @@ def main() -> None:
         provider = get_provider(data_source)
         bars = provider.fetch_daily_bars(symbol=symbol, start=args.start, end=args.end)
 
-    if len(bars) < args.rebound_window + 2:
-        raise SystemExit(
-            "Not enough bars to run analysis with the selected rebound window."
-        )
+    if len(bars) < 2:
+        raise SystemExit("Need at least two daily bars to compare closes.")
 
     report = analyze_dip_rebounds(
         symbol=symbol,
@@ -93,19 +91,25 @@ def main() -> None:
     print(f"Symbol: {report.symbol}")
     print(f"Date range: {bars[0].date} -> {bars[-1].date}")
     print(f"Bars analyzed: {report.bar_count}")
-    print(f"Dip events (>= {args.dip_threshold:.2f}% close drop): {report.dip_count}")
+    print(f"Dip setups (>= {args.dip_threshold:.2f}% close drop): {report.dip_count}")
     print(
         f"Rebound target (within {args.rebound_window} days): {args.rebound_target:.2f}%"
     )
-    print(f"Successes: {report.success_count}/{report.dip_count}")
-    print(f"Success rate: {_format_pct(report.success_rate)}")
+    print(f"Resolved outcomes: {report.resolved_dip_count}/{report.dip_count}")
+    print(f"Successes: {report.success_count}/{report.resolved_dip_count}")
+    print(f"Success rate (resolved only): {_format_pct(report.success_rate)}")
     print(
-        "95% Wilson CI: "
+        "95% Wilson CI (resolved only): "
         f"{_format_pct(report.confidence_low)} to {_format_pct(report.confidence_high)}"
     )
-    print(f"Avg max rebound after dip: {_format_pct(report.average_max_return_pct)}")
+    print(f"Completed {args.rebound_window}-day windows: {report.completed_window_count}")
     print(
-        f"Avg worst drawdown after dip: {_format_pct(report.average_worst_drawdown_pct)}"
+        "Avg max rebound after dip "
+        f"(completed windows): {_format_pct(report.average_max_return_pct)}"
+    )
+    print(
+        "Avg worst drawdown after dip "
+        f"(completed windows): {_format_pct(report.average_worst_drawdown_pct)}"
     )
 
     _warn_if_small_sample(report.dip_count)
@@ -114,12 +118,20 @@ def main() -> None:
         print()
         print("Recent dip events:")
         for event in report.dip_events[-args.show_events :]:
-            outcome = "HIT" if event.success else "MISS"
+            if event.historical_success:
+                outcome = "HIT"
+            elif event.window_complete:
+                outcome = "MISS"
+            else:
+                outcome = "OPEN"
             days = (
-                str(event.days_to_target) if event.days_to_target is not None else "-"
+                str(event.historical_days_to_target)
+                if event.historical_days_to_target is not None
+                else "-"
             )
             print(
                 f"- {event.date} | dip={_format_pct(event.dip_pct)} "
+                f"observed_days={event.observed_days} "
                 f"max_rebound={_format_pct(event.max_return_pct)} "
                 f"drawdown={_format_pct(event.worst_drawdown_pct)} "
                 f"days_to_target={days} | {outcome}"
