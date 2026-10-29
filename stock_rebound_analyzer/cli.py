@@ -1,129 +1,144 @@
+"""Standalone CLI for a one-off symbol profile (no cache)."""
+
 from __future__ import annotations
 
 import argparse
-import os
-from datetime import date, timedelta
+import json
+from datetime import datetime, timedelta, timezone
 
-from dotenv import load_dotenv
-
-from .analysis import analyze_dip_rebounds
-from .data_loader import load_bars_from_csv
-from .data_providers import get_provider
+from .config import AnalysisConfig
+from .profile import build_profile
+from .providers import get_provider
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Analyze dip/rebound behavior for a stock symbol."
+        description="Build a dip-rebound profile for one symbol."
     )
-    parser.add_argument("--symbol", required=True, help="Ticker symbol, e.g. SUUN")
+    parser.add_argument("symbol", help="Ticker, e.g. AAPL or DEMO")
     parser.add_argument(
-        "--start",
-        default=(date.today() - timedelta(days=365)).isoformat(),
-        help="Start date YYYY-MM-DD",
+        "--provider",
+        default="auto",
+        help="auto | yahoo | alpaca | synthetic | csv",
     )
-    parser.add_argument(
-        "--end", default=date.today().isoformat(), help="End date YYYY-MM-DD"
-    )
-    parser.add_argument(
-        "--dip-threshold",
-        type=float,
-        default=5.0,
-        help="Dip threshold percent (default: 5)",
-    )
-    parser.add_argument(
-        "--rebound-target",
-        type=float,
-        default=3.0,
-        help="Rebound target percent (default: 3)",
-    )
-    parser.add_argument(
-        "--rebound-window",
-        type=int,
-        default=5,
-        help="Look-ahead window in trading days (default: 5)",
-    )
-    parser.add_argument("--csv", help="Optional local CSV path to use instead of API")
-    parser.add_argument(
-        "--show-events",
-        type=int,
-        default=8,
-        help="How many most-recent dip events to print",
-    )
+    parser.add_argument("--csv", help="CSV path when --provider csv")
+    parser.add_argument("--timeframe", default="5m", help="1m|5m|15m|30m|1h|1d")
+    parser.add_argument("--config-json", help="JSON object of AnalysisConfig overrides")
+    parser.add_argument("--json", action="store_true", help="Print the full profile JSON")
     return parser.parse_args()
 
 
-def _format_pct(value: float) -> str:
-    return f"{value * 100:.2f}%"
+def _print_summary(profile: dict) -> None:
+    meta = profile.get("meta", {})
+    print()
+    print(f"{meta.get('symbol')}  mode={meta.get('mode')}  bars={meta.get('bars_analyzed')}")
+    qualification = profile.get("qualification", {})
+    print(
+        "Qualification: "
+        f"{qualification.get('status')}  score={qualification.get('score')}"
+    )
+    for reason in qualification.get("reasons", []):
+        mark = "PASS" if reason.get("passed") else "FAIL"
+        print(f"  [{mark}] {reason.get('label')}: {reason.get('value')} ({reason.get('target')})")
 
+    recommended = profile.get("recommended")
+    if recommended:
+        stats = recommended.get("stats", {})
+        print()
+        print(f"Recommended signal: {recommended.get('name')} ({recommended.get('rule_id')})")
+        print(
+            f"  {stats.get('trades')} trades | hit {stats.get('hit_rate', 0):.1%} "
+            f"[{stats.get('hit_rate_low', 0):.1%}-{stats.get('hit_rate_high', 0):.1%}] "
+            f"| net EV {stats.get('net_ev_pct', 0):+.2f}%/trade "
+            f"| {stats.get('trades_per_week', 0):.2f} trades/wk "
+            f"| {stats.get('weekly_return_pct', 0):+.2f}%/wk"
+        )
+        print(
+            f"  stop rate {stats.get('stop_rate', 0):.1%} | "
+            f"2h/fast hit {stats.get('fast_hit_rate', 0):.1%} | "
+            f"median hold {stats.get('median_holding_minutes', 0):.0f} market min | "
+            f"max DD {stats.get('max_drawdown_pct', 0):.1f}%"
+        )
+        wf = recommended.get("walk_forward_oos")
+        if wf:
+            print(
+                "  walk-forward OOS: "
+                f"{wf.get('trades')} trades, hit {wf.get('hit_rate', 0):.1%}, "
+                f"net EV {wf.get('net_ev_pct', 0):+.2f}%, "
+                f"{wf.get('weekly_return_pct', 0):+.2f}%/wk"
+            )
+        print(f"  {recommended.get('selection_reason')}")
 
-def _warn_if_small_sample(dip_count: int) -> None:
-    if dip_count < 20:
-        print("WARNING: Fewer than 20 dip events. Confidence interval may be unstable.")
+    model = profile.get("model", {})
+    print()
+    if model.get("available"):
+        print(
+            f"Model: AUC {model.get('auc')} | Brier {model.get('brier')} | "
+            f"threshold {model.get('recommended_threshold')} | "
+            f"samples {model.get('samples')}"
+        )
+        top = model.get("features", [])[:5]
+        print("  top features: " + ", ".join(f"{f['name']} ({f['coefficient']:+.2f})" for f in top))
+    else:
+        print(f"Model: unavailable ({model.get('reason')})")
+
+    read = profile.get("signal_read", {})
+    print()
+    print(f"Current read: {read.get('state')} - {read.get('detail')}")
+    if read.get("waiting_for"):
+        print("  waiting for: " + "; ".join(read["waiting_for"]))
+    if read.get("levels"):
+        levels = read["levels"]
+        print(
+            f"  entry~{levels.get('entry_estimate'):.2f} target {levels.get('target'):.2f} "
+            f"stop {levels.get('stop'):.2f}"
+        )
+    risk = read.get("fake_rebound_risk", {})
+    if risk:
+        print(f"  fake-rebound risk: {risk.get('level')} - {risk.get('detail')}")
+
+    if profile.get("warnings"):
+        print()
+        for warning in profile["warnings"]:
+            print(f"WARNING: {warning}")
 
 
 def main() -> None:
-    load_dotenv()
     args = _parse_args()
-
+    overrides = json.loads(args.config_json) if args.config_json else {}
+    overrides["timeframe"] = args.timeframe
+    config = AnalysisConfig.from_dict(overrides)
+    provider = get_provider(args.provider, path=args.csv)
     symbol = args.symbol.upper().strip()
-    dip_threshold = args.dip_threshold / 100
-    rebound_target = args.rebound_target / 100
+    end = datetime.now(timezone.utc)
+    daily_start = end - timedelta(days=config.daily_history_days)
+    intraday_start = end - timedelta(days=config.intraday_history_days)
 
-    if args.csv:
-        bars = load_bars_from_csv(args.csv, symbol=symbol)
-    else:
-        data_source = os.getenv("DATA_SOURCE", "yahoo")
-        provider = get_provider(data_source)
-        bars = provider.fetch_daily_bars(symbol=symbol, start=args.start, end=args.end)
+    daily = provider.fetch_bars(symbol, "1d", daily_start, end)
+    intraday = []
+    if config.timeframe != "1d":
+        try:
+            intraday = provider.fetch_bars(
+                symbol, config.timeframe, intraday_start, end
+            )
+        except Exception as exc:  # noqa: BLE001 - CLI is best-effort
+            print(f"Intraday fetch failed, falling back to daily: {exc}")
 
-    if len(bars) < args.rebound_window + 2:
-        raise SystemExit(
-            "Not enough bars to run analysis with the selected rebound window."
-        )
-
-    report = analyze_dip_rebounds(
+    profile = build_profile(
         symbol=symbol,
-        bars=bars,
-        dip_threshold_pct=dip_threshold,
-        rebound_target_pct=rebound_target,
-        rebound_window_days=args.rebound_window,
+        daily_bars=daily,
+        intraday_bars=intraday,
+        config=config,
+        data_info={
+            "daily_source": provider.name,
+            "intraday_source": provider.name if intraday else None,
+            "provider": provider.describe(),
+        },
     )
-
-    print()
-    print(f"Symbol: {report.symbol}")
-    print(f"Date range: {bars[0].date} -> {bars[-1].date}")
-    print(f"Bars analyzed: {report.bar_count}")
-    print(f"Dip events (>= {args.dip_threshold:.2f}% close drop): {report.dip_count}")
-    print(
-        f"Rebound target (within {args.rebound_window} days): {args.rebound_target:.2f}%"
-    )
-    print(f"Successes: {report.success_count}/{report.dip_count}")
-    print(f"Success rate: {_format_pct(report.success_rate)}")
-    print(
-        "95% Wilson CI: "
-        f"{_format_pct(report.confidence_low)} to {_format_pct(report.confidence_high)}"
-    )
-    print(f"Avg max rebound after dip: {_format_pct(report.average_max_return_pct)}")
-    print(
-        f"Avg worst drawdown after dip: {_format_pct(report.average_worst_drawdown_pct)}"
-    )
-
-    _warn_if_small_sample(report.dip_count)
-
-    if report.dip_events:
-        print()
-        print("Recent dip events:")
-        for event in report.dip_events[-args.show_events :]:
-            outcome = "HIT" if event.success else "MISS"
-            days = (
-                str(event.days_to_target) if event.days_to_target is not None else "-"
-            )
-            print(
-                f"- {event.date} | dip={_format_pct(event.dip_pct)} "
-                f"max_rebound={_format_pct(event.max_return_pct)} "
-                f"drawdown={_format_pct(event.worst_drawdown_pct)} "
-                f"days_to_target={days} | {outcome}"
-            )
+    if args.json:
+        print(json.dumps(profile, indent=2, sort_keys=True))
+    else:
+        _print_summary(profile)
 
 
 if __name__ == "__main__":

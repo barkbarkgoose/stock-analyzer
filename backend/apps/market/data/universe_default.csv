@@ -1,0 +1,138 @@
+symbol,name,sector
+AAPL,Apple,Technology
+MSFT,Microsoft,Technology
+NVDA,NVIDIA,Semiconductors
+AMZN,Amazon,Consumer Discretionary
+META,Meta Platforms,Communication Services
+GOOGL,Alphabet,Communication Services
+AVGO,Broadcom,Semiconductors
+TSLA,Tesla,Consumer Discretionary
+AMD,Advanced Micro Devices,Semiconductors
+NFLX,Netflix,Communication Services
+CRM,Salesforce,Technology
+ADBE,Adobe,Technology
+NOW,ServiceNow,Technology
+INTU,Intuit,Technology
+PANW,Palo Alto Networks,Cybersecurity
+CRWD,CrowdStrike,Cybersecurity
+ZS,Zscaler,Cybersecurity
+NET,Cloudflare,Technology
+DDOG,Datadog,Technology
+SNOW,Snowflake,Technology
+MDB,MongoDB,Technology
+TEAM,Atlassian,Technology
+WDAY,Workday,Technology
+HUBS,HubSpot,Technology
+VEEV,Veeva,Healthcare Technology
+PLTR,Palantir,Technology
+AI,C3.ai,Technology
+PATH,UiPath,Technology
+U,Unity Software,Technology
+RBLX,Roblox,Communication Services
+SHOP,Shopify,Consumer Discretionary
+SQ,Block,Fintech
+PYPL,PayPal,Fintech
+COIN,Coinbase,Fintech
+HOOD,Robinhood,Fintech
+SOFI,SoFi,Fintech
+AFRM,Affirm,Fintech
+UPST,Upstart,Fintech
+MSTR,MicroStrategy,Technology
+MARA,Marathon Digital,Crypto Mining
+RIOT,Riot Platforms,Crypto Mining
+CLSK,CleanSpark,Crypto Mining
+HUT,Hut 8,Crypto Mining
+BITF,Bitfarms,Crypto Mining
+CIFR,Cipher Mining,Crypto Mining
+IREN,IREN,Crypto Mining
+CORZ,Core Scientific,Crypto Mining
+APLD,Applied Digital,Data Centers
+UBER,Uber,Consumer Discretionary
+LYFT,Lyft,Consumer Discretionary
+ABNB,Airbnb,Consumer Discretionary
+DASH,DoorDash,Consumer Discretionary
+BKNG,Booking,Consumer Discretionary
+EXPE,Expedia,Consumer Discretionary
+RIVN,Rivian,Automotive
+LCID,Lucid,Automotive
+NIO,NIO,Automotive
+XPEV,XPeng,Automotive
+LI,Li Auto,Automotive
+TSM,TSMC,Semiconductors
+ASML,ASML,Semiconductors
+MU,Micron,Semiconductors
+QCOM,Qualcomm,Semiconductors
+ARM,Arm,Semiconductors
+SMCI,Super Micro,Technology
+DELL,Dell,Technology
+HPQ,HP,Technology
+ANET,Arista Networks,Technology
+CSCO,Cisco,Technology
+ORCL,Oracle,Technology
+IBM,IBM,Technology
+SAP,SAP,Technology
+BABA,Alibaba,Consumer Discretionary
+PDD,PDD Holdings,Consumer Discretionary
+JD,JD.com,Consumer Discretionary
+BIDU,Baidu,Communication Services
+TCEHY,Tencent,Communication Services
+SONY,Sony,Technology
+MELI,MercadoLibre,Consumer Discretionary
+SE,Sea Limited,Consumer Discretionary
+GRAB,Grab,Technology
+CPNG,Coupang,Consumer Discretionary
+SPOT,Spotify,Communication Services
+ROKU,Roku,Communication Services
+PINS,Pinterest,Communication Services
+SNAP,Snap,Communication Services
+TTD,Trade Desk,Technology
+APP,AppLovin,Technology
+DKNG,DraftKings,Consumer Discretionary
+PENN,PENN Entertainment,Consumer Discretionary
+WYNN,Wynn Resorts,Consumer Discretionary
+LVS,Las Vegas Sands,Consumer Discretionary
+MGM,MGM Resorts,Consumer Discretionary
+CCL,Carnival,Consumer Discretionary
+NCLH,Norwegian Cruise,Consumer Discretionary
+RCL,Royal Caribbean,Consumer Discretionary
+DAL,Delta Air Lines,Industrials
+UAL,United Airlines,Industrials
+AAL,American Airlines,Industrials
+LUV,Southwest Airlines,Industrials
+BA,Boeing,Industrials
+CAT,Caterpillar,Industrials
+DE,Deere,Industrials
+GE,GE Aerospace,Industrials
+GEV,GE Vernova,Industrials
+VST,Vistra,Utilities
+CEG,Constellation Energy,Utilities
+TLN,Talen Energy,Utilities
+OKLO,Oklo,Utilities
+SMR,NuScale Power,Utilities
+NNE,Nano Nuclear,Utilities
+ENPH,Enphase Energy,Energy
+FSLR,First Solar,Energy
+RUN,Sunrun,Energy
+SEDG,SolarEdge,Energy
+PLUG,Plug Power,Energy
+BE,Bloom Energy,Energy
+FCEL,FuelCell Energy,Energy
+XOM,Exxon Mobil,Energy
+CVX,Chevron,Energy
+OXY,Occidental,Energy
+SLB,Schlumberger,Energy
+HAL,Halliburton,Energy
+F,Ford,Automotive
+GM,General Motors,Automotive
+SPY,SPDR S&P 500 ETF,ETF
+QQQ,Invesco QQQ ETF,ETF
+IWM,iShares Russell 2000 ETF,ETF
+ARKK,ARK Innovation ETF,ETF
+SOXL,Direxion Semiconductor Bull 3X,ETF
+TQQQ,ProShares UltraPro QQQ,ETF
+SQQQ,ProShares UltraPro Short QQQ,ETF
+UVXY,ProShares Ultra VIX Short-Term,ETF
+VXX,iPath VIX Short-Term,ETF
+XLF,Financial Select Sector SPDR,ETF
+XLE,Energy Select Sector SPDR,ETF
+SMH,VanEck Semiconductor ETF,ETF

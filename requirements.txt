@@ -1,3 +1,2 @@
-requests>=2.31.0
-python-dotenv>=1.0.0
-yfinance>=0.2.0
+# Convenience wrapper; the backend owns the authoritative dependency list.
+-r backend/requirements.txt
