@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import BucketBars from '@/components/market/BucketBars.vue'
+import Term from '@/components/Term.vue'
 import {
   formatHold,
   formatNumber,
@@ -45,15 +46,15 @@ function confidence(row: { hit_rate_low: number; hit_rate_high: number }): strin
           <tr>
             <th class="px-3 py-2 font-medium">Rule</th>
             <th class="px-2 py-2 text-right font-medium">Trades</th>
-            <th class="px-2 py-2 text-right font-medium">Hit</th>
-            <th class="px-2 py-2 text-right font-medium">95% CI</th>
-            <th class="px-2 py-2 text-right font-medium">Net EV</th>
-            <th class="px-2 py-2 text-right font-medium">Weekly</th>
-            <th class="px-2 py-2 text-right font-medium">/wk</th>
-            <th class="px-2 py-2 text-right font-medium">Stop</th>
-            <th class="px-2 py-2 text-right font-medium">Fast</th>
-            <th class="px-2 py-2 text-right font-medium">Hold</th>
-            <th class="px-2 py-2 text-right font-medium">Max DD</th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="hit_rate">Hit</Term></th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="wilson_ci">95% CI</Term></th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="net_ev">Net EV</Term></th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="weekly_return">Weekly</Term></th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="trades_per_week">/wk</Term></th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="stop_rate">Stop</Term></th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="fast_hit_rate">Fast</Term></th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="hold">Hold</Term></th>
+            <th class="px-2 py-2 text-right font-medium"><Term k="max_drawdown">Max DD</Term></th>
             <th class="px-2 py-2 text-right font-medium">Score</th>
           </tr>
         </thead>
@@ -111,12 +112,12 @@ function confidence(row: { hit_rate_low: number; hit_rate_high: number }): strin
         <div class="rounded-lg border border-slate-200 bg-white p-3">
           <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Outcome mix</div>
           <div class="mt-2 space-y-1 text-xs text-slate-600">
-            <div class="flex justify-between"><span>Target</span><span class="font-semibold tabular-nums">{{ formatRate(selectedRule.hit_rate) }}</span></div>
+            <div class="flex justify-between"><span><Term k="triple_barrier">Target</Term></span><span class="font-semibold tabular-nums">{{ formatRate(selectedRule.hit_rate) }}</span></div>
             <div class="flex justify-between"><span>Stop</span><span class="font-semibold tabular-nums">{{ formatRate(selectedRule.stop_rate) }}</span></div>
             <div class="flex justify-between"><span>Timeout</span><span class="font-semibold tabular-nums">{{ formatRate(selectedRule.timeout_rate) }}</span></div>
-            <div class="flex justify-between"><span>Avg MFE</span><span class="font-semibold tabular-nums">{{ formatSignedPercent(selectedRule.avg_mfe_pct) }}</span></div>
-            <div class="flex justify-between"><span>Avg MAE</span><span class="font-semibold tabular-nums">{{ formatSignedPercent(selectedRule.avg_mae_pct) }}</span></div>
-            <div class="flex justify-between"><span>Exposure</span><span class="font-semibold tabular-nums">{{ formatRate(selectedRule.exposure_pct) }}</span></div>
+            <div class="flex justify-between"><span><Term k="mfe_mae">Avg MFE</Term></span><span class="font-semibold tabular-nums">{{ formatSignedPercent(selectedRule.avg_mfe_pct) }}</span></div>
+            <div class="flex justify-between"><span><Term k="mfe_mae">Avg MAE</Term></span><span class="font-semibold tabular-nums">{{ formatSignedPercent(selectedRule.avg_mae_pct) }}</span></div>
+            <div class="flex justify-between"><span><Term k="exposure">Exposure</Term></span><span class="font-semibold tabular-nums">{{ formatRate(selectedRule.exposure_pct) }}</span></div>
           </div>
         </div>
       </div>

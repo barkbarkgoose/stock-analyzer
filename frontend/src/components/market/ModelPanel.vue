@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/stores/analyzer'
+import Term from '@/components/Term.vue'
 import type { RuleStats } from '@/types/market'
 import {
   formatNumber,
@@ -75,15 +76,15 @@ const tabs: Array<{ id: Tab; label: string }> = [
       <div v-if="activeTab === 'overview'" class="space-y-5">
         <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400">AUC</div>
+            <div class="text-[10px] uppercase tracking-wide text-slate-400"><Term k="auc">AUC</Term></div>
             <div class="text-lg font-semibold tabular-nums" :class="(model.auc ?? 0) >= 0.55 ? 'text-emerald-700' : 'text-slate-900'">{{ formatNumber(model.auc, 3) }}</div>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400">Brier</div>
+            <div class="text-[10px] uppercase tracking-wide text-slate-400"><Term k="brier">Brier</Term></div>
             <div class="text-lg font-semibold tabular-nums text-slate-900">{{ formatNumber(model.brier, 3) }}</div>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400">Base rate</div>
+            <div class="text-[10px] uppercase tracking-wide text-slate-400"><Term k="base_rate">Base rate</Term></div>
             <div class="text-lg font-semibold tabular-nums text-slate-900">{{ formatRate(model.base_rate) }}</div>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
@@ -91,11 +92,11 @@ const tabs: Array<{ id: Tab; label: string }> = [
             <div class="text-lg font-semibold tabular-nums text-slate-900">{{ model.samples }}</div>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400">OOS test</div>
+            <div class="text-[10px] uppercase tracking-wide text-slate-400"><Term k="oos">OOS</Term> test</div>
             <div class="text-lg font-semibold tabular-nums text-slate-900">{{ model.test_samples }}</div>
           </div>
           <div class="rounded-lg bg-blue-50 px-3 py-2">
-            <div class="text-[10px] uppercase tracking-wide text-blue-500">Threshold</div>
+            <div class="text-[10px] uppercase tracking-wide text-blue-500"><Term k="threshold">Threshold</Term></div>
             <div class="text-lg font-semibold tabular-nums text-blue-800">{{ formatNumber(recommendedThreshold, 2) }}</div>
           </div>
         </div>

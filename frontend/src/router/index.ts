@@ -14,7 +14,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/AnalyzerView.vue')
   },
   {
-    path: '/screener',
+    path: '/screener/:runId?',
     name: 'screener',
     component: () => import('@/views/ScreenerView.vue')
   },
@@ -27,6 +27,11 @@ const routes: RouteRecordRaw[] = [
     path: '/paper',
     name: 'paper',
     component: () => import('@/views/PaperView.vue')
+  },
+  {
+    path: '/glossary',
+    name: 'glossary',
+    component: () => import('@/views/GlossaryView.vue')
   },
   {
     path: '/login',

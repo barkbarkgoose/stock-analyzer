@@ -30,14 +30,15 @@ const navItems = [
   { name: 'Analyzer', path: '/' },
   { name: 'Screener', path: '/screener' },
   { name: 'Watchlist', path: '/watchlist' },
-  { name: 'Paper', path: '/paper' }
+  { name: 'Paper', path: '/paper' },
+  { name: 'Glossary', path: '/glossary' }
 ]
 
 function isActive(path: string): boolean {
   if (path === '/') {
     return route.path === '/' || route.path.startsWith('/analyzer')
   }
-  return route.path === path
+  return route.path === path || route.path.startsWith(`${path}/`)
 }
 
 function handleLogout(): void {

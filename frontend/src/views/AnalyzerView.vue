@@ -15,10 +15,12 @@ import ModelPanel from '@/components/market/ModelPanel.vue'
 import TradeTable from '@/components/market/TradeTable.vue'
 import EquityChart from '@/components/market/EquityChart.vue'
 import { useAnalyzerStore } from '@/stores/analyzer'
+import { useScreenerStore } from '@/stores/screener'
 import { formatDateTime } from '@/utils/format'
 import type { Timeframe } from '@/types/market'
 
 const store = useAnalyzerStore()
+const screener = useScreenerStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -43,6 +45,11 @@ function changeTimeframe(event: Event): void {
   const value = (event.target as HTMLSelectElement).value as Timeframe
   store.updateConfig({ timeframe: value })
   void store.analyze(false)
+}
+
+function backToScreener(): void {
+  if (screener.runId === null) return
+  void router.push({ name: 'screener', params: { runId: String(screener.runId) } })
 }
 
 watch(
@@ -82,6 +89,9 @@ onMounted(async () => {
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <button v-if="screener.runId !== null" class="btn-secondary h-9 text-xs" type="button" @click="backToScreener">
+            ← Screener results
+          </button>
           <label class="text-[11px] font-medium uppercase tracking-wide text-slate-400" for="timeframe">TF</label>
           <select id="timeframe" class="input h-9 w-24 py-0 text-xs font-medium" :value="timeframe" @change="changeTimeframe">
             <option v-for="tf in timeframes" :key="tf" :value="tf">{{ tf }}</option>
@@ -162,6 +172,7 @@ onMounted(async () => {
           <div class="card p-4 text-[11px] leading-relaxed text-slate-500">
             <div class="font-semibold text-slate-700">Reading the numbers</div>
             <p class="mt-1">Hit rate is target-before-stop. Net EV includes costs. Weekly is compounded sequential trades, not a forecast. Walk-forward OOS is the honest estimate.</p>
+            <router-link class="mt-2 inline-block font-medium text-blue-600 hover:text-blue-700" to="/glossary">Full glossary →</router-link>
             <p class="mt-2 text-slate-400">Built {{ profile.cache?.built_at ? formatDateTime(profile.cache.built_at) : formatDateTime(profile.meta.generated_at) }} · engine {{ profile.meta.engine_version }}</p>
           </div>
         </aside>

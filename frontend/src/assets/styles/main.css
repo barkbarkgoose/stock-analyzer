@@ -46,4 +46,23 @@ body {
   .input {
     @apply block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100;
   }
+
+  /* Inline glossary term: dotted underline signals "hover for a definition". */
+  .help-term {
+    @apply cursor-help border-b border-dotted border-slate-400/70;
+  }
+
+  /* Tooltip is teleported to <body> and positioned fixed so it is never
+     clipped by the scroll containers that wrap the data tables. */
+  .help-tip {
+    @apply pointer-events-none fixed z-50 w-64 -translate-x-1/2 rounded-lg bg-slate-900 px-3 py-2 text-left text-[11px] font-normal normal-case leading-snug tracking-normal text-slate-100 shadow-xl;
+  }
+
+  .help-tip__term {
+    @apply block font-semibold text-white;
+  }
+
+  .help-tip__body {
+    @apply mt-0.5 block text-slate-300;
+  }
 }
