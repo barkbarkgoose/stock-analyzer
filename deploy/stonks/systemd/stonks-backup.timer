@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Stonks database backup nightly
+
+[Timer]
+OnCalendar=*-*-* 08:15:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

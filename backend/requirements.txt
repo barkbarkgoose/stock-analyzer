@@ -26,3 +26,8 @@ numpy>=1.26
 pandas>=2.2
 scikit-learn>=1.5
 python-dotenv>=1.0
+
+# Production serving (Docker image / VPS)
+gunicorn>=23.0
+psycopg[binary]>=3.2
+whitenoise>=6.7

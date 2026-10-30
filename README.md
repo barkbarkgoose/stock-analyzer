@@ -89,7 +89,7 @@ uv run python manage.py backfill_intraday --watchlist
 
 ## Setup
 
-Prerequisites: Python 3.12/3.13, [`uv`](https://docs.astral.sh/uv/), Node 20+, and a package manager for the frontend. The repo is set up for pnpm; a local `node_modules` is the only hard requirement for `./dev.sh`.
+Prerequisites: Python 3.12/3.13, [`uv`](https://docs.astral.sh/uv/), Node 22+ (pnpm 11 requires it), and a package manager for the frontend. The repo is set up for pnpm; a local `node_modules` is the only hard requirement for `./dev.sh`.
 
 ```bash
 # 1. Python environment
@@ -108,9 +108,12 @@ cd ..
 
 # 4. Run both servers
 ./dev.sh
+
+# 5. Create a login (there is no sign-up page; every page requires one)
+cd backend && ../.venv/bin/python manage.py add_user you@example.com --name "You"
 ```
 
-The runner finds free ports starting at `8800` (Django) and `5177` (Vite), applies migrations, and stops both on Ctrl+C. Open `http://localhost:5177`. For production, build `frontend/dist`, serve it from any static host, and proxy `/api` to Django; the dev runner is development-only.
+The runner finds free ports starting at `8800` (Django) and `5177` (Vite), applies migrations, and stops both on Ctrl+C. Open `http://localhost:5177`. The dev runner is development-only; for the hosted setup (Docker, Postgres, Caddy on one DigitalOcean droplet) see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ### Choosing a provider
 
@@ -183,7 +186,7 @@ uv run python -m stock_rebound_analyzer.cli AAPL --provider yahoo --timeframe 1d
 
 ## HTTP API
 
-Market endpoints are intentionally `AllowAny` for local single-user use. If you expose the app beyond localhost, put it behind auth (or the existing JWT layer).
+Every endpoint requires a JWT from `POST /api/v1/auth/login/` (`{email, password}` → `{access, refresh}`), sent as `Authorization: Bearer <access>`. Exchange the refresh token at `POST /api/v1/auth/refresh/`. Accounts are created with `manage.py add_user`; there is no public registration. `GET /health/` is the only anonymous route.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -208,8 +211,10 @@ Market endpoints are intentionally `AllowAny` for local single-user use. If you 
 Example:
 
 ```bash
+TOKEN=$(curl -s http://127.0.0.1:8800/api/v1/auth/login/ -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"..."}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["access"])')
 curl -X POST http://127.0.0.1:8800/api/v1/market/analyze \
-  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"symbol":"TSLA","config":{"timeframe":"5m","dip_threshold_pct":5,"target_pct":1,"stop_pct":2,"max_hold_days":2}}'
 ```
 
@@ -250,6 +255,9 @@ stock_rebound_analyzer/     Pure Python research engine
   profile.py                The profile JSON consumed by the UI/API
 backend/apps/market/        Django persistence, ingestion, API, paper trading
 frontend/src/               Vue 3 workbench (analyzer, screener, watchlist, paper)
+Dockerfile, compose.production.yaml   Production image and stack (see docs/DEPLOY.md)
+deploy/stonks/              Caddyfile, env template, systemd timers
+scripts/                    server-setup.sh (one-time), ops.sh (deploy/backup/users)
 tests/                      Engine unit tests
 backend/apps/market/tests/  API/service tests
 ```

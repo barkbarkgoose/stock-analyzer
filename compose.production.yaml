@@ -1,0 +1,88 @@
+# Production stack for one VPS. Always run through scripts/ops.sh, which passes
+# --env-file /etc/stonks/app.env; values below are interpolated from that file.
+#
+#   db     Postgres 17, internal network only, no published port
+#   app    gunicorn + Django + built Vue app, published on 127.0.0.1:8000 for Caddy
+#   paper  simulated paper-trading loop (sleeps outside US market hours)
+
+name: stonks
+
+x-app-env: &app-env
+  DJANGO_ENV: production
+  SECRET_KEY: ${SECRET_KEY:?set in /etc/stonks/app.env}
+  SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set in /etc/stonks/app.env}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:?set in /etc/stonks/app.env}
+  DATABASE_URL: postgres://stonks:${POSTGRES_PASSWORD:?set in /etc/stonks/app.env}@db:5432/stonks
+  SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-3600}
+  MARKET_PROVIDER: ${MARKET_PROVIDER:-auto}
+  ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+  ALPACA_API_SECRET: ${ALPACA_API_SECRET:-}
+  ALPACA_FEED: ${ALPACA_FEED:-iex}
+  MARKET_PAPER_ENABLED: ${MARKET_PAPER_ENABLED:-true}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: stonks
+      POSTGRES_USER: stonks
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in /etc/stonks/app.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stonks -d stonks"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    stop_grace_period: 60s
+    logging: *logging
+
+  app:
+    image: stonks-app:${APP_TAG:-current}
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app-env
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks: [backend, egress]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 45s
+    logging: *logging
+
+  paper:
+    image: stonks-app:${APP_TAG:-current}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app-env
+    command: ["python", "manage.py", "paper_tick", "--interval", "${PAPER_TICK_INTERVAL:-120}"]
+    networks: [backend, egress]
+    stop_grace_period: 20s
+    logging: *logging
+
+networks:
+  # No route out: the database can only talk to the app containers.
+  backend:
+    internal: true
+  egress: {}
+
+volumes:
+  pgdata:

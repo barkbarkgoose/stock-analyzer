@@ -1,0 +1,20 @@
+# Installed to /etc/caddy/Caddyfile by scripts/server-setup.sh.
+# Caddy obtains and renews the TLS certificate automatically and redirects
+# HTTP to HTTPS. The app is only reachable through here (127.0.0.1:8000).
+stonks.allbarker.com {
+	encode zstd gzip
+
+	# The API takes small JSON bodies; there are no uploads.
+	request_body {
+		max_size 1MB
+	}
+
+	reverse_proxy 127.0.0.1:8000 {
+		# Profile builds can take a while on a cold cache.
+		transport http {
+			read_timeout 180s
+		}
+	}
+
+	header -Server
+}

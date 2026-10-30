@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect 5m history after the US close, before Yahoo's window rolls off
+
+[Timer]
+# 22:30 UTC is after the 16:00 New York close in both EST and EDT.
+OnCalendar=Mon..Fri *-*-* 22:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

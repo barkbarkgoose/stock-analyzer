@@ -1,0 +1,10 @@
+[Unit]
+Description=Stonks intraday history backfill for watchlist symbols
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/stonks
+ExecStart=/opt/stonks/scripts/ops.sh backfill
+TimeoutStartSec=2h
