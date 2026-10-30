@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   createChart,
+  type AreaData,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
@@ -10,20 +11,32 @@ import {
   type Time,
   type UTCTimestamp
 } from 'lightweight-charts'
-import type { ChartBar, Trade } from '@/types/market'
+import Term from '@/components/Term.vue'
+import type { ChartBar, Trade, WatchBand } from '@/types/market'
 import { formatMoney, formatPercent, formatTime } from '@/utils/format'
+
+type Source = 'blind' | 'hindsight'
 
 const props = defineProps<{
   bars: ChartBar[]
   trades: Trade[]
+  bands: WatchBand[]
   timeframe: string
+  source: Source
 }>()
+const emit = defineEmits<{ 'update:source': [value: Source] }>()
+
+const BAND_COLORS: Record<WatchBand['kind'], string> = {
+  watch: 'rgba(245, 158, 11, 0.13)',
+  extended: 'rgba(14, 165, 233, 0.10)'
+}
 
 const container = ref<HTMLElement | null>(null)
 const viewMode = ref<'recent' | 'all'>('recent')
 let chart: IChartApi | null = null
 let candleSeries: ISeriesApi<'Candlestick'> | null = null
 let volumeSeries: ISeriesApi<'Histogram'> | null = null
+let bandSeries: ISeriesApi<'Area'> | null = null
 let observer: ResizeObserver | null = null
 let barTimes = new Set<string>()
 
@@ -98,6 +111,30 @@ function buildMarkers(): SeriesMarker<Time>[] {
   })
 }
 
+// A full-height area, tinted per bar when the bar falls inside a band. An area
+// (unlike histogram columns) leaves no gaps between bars when zoomed in.
+function buildBandData(): AreaData[] {
+  const bands = [...props.bands].sort((a, b) => a.start.localeCompare(b.start))
+  const spans = bands.map((band) => ({
+    kind: band.kind,
+    start: new Date(band.start).getTime(),
+    end: new Date(band.end).getTime()
+  }))
+  const out: AreaData[] = []
+  let pointer = 0
+  for (const bar of props.bars) {
+    const time = timeOf(bar.ts)
+    if (!time) continue
+    const t = new Date(bar.ts).getTime()
+    while (pointer < spans.length && spans[pointer].end < t) pointer += 1
+    const span = spans[pointer]
+    const inside = span && span.start <= t && t <= span.end
+    const color = inside ? BAND_COLORS[span.kind] : 'rgba(0, 0, 0, 0)'
+    out.push({ time, value: 1, topColor: color, bottomColor: color, lineColor: 'rgba(0, 0, 0, 0)' })
+  }
+  return out
+}
+
 function applyView(): void {
   if (!chart) return
   if (viewMode.value === 'all') {
@@ -117,6 +154,7 @@ function buildChart(): void {
     chart = null
     candleSeries = null
     volumeSeries = null
+    bandSeries = null
   }
   if (!props.bars.length) {
     barTimes = new Set()
@@ -144,6 +182,19 @@ function buildChart(): void {
     crosshair: { mode: 0 },
     localization: { timeFormatter: formatTimeLabel }
   })
+
+  // Added first so the shading sits behind the candles.
+  bandSeries = chart.addAreaSeries({
+    priceScaleId: 'bands',
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+    lineWidth: 1,
+    lineColor: 'rgba(0, 0, 0, 0)',
+    // Pin the hidden scale to 0..1 so a value of 1 reaches the top edge.
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } })
+  })
+  chart.priceScale('bands').applyOptions({ visible: false, scaleMargins: { top: 0, bottom: 0 } })
 
   candleSeries = chart.addCandlestickSeries({
     upColor: '#16a34a',
@@ -182,6 +233,7 @@ function buildChart(): void {
   }
   candleSeries.setData(candles)
   volumeSeries.setData(volumes)
+  bandSeries.setData(buildBandData())
   candleSeries.setMarkers(buildMarkers())
   applyView()
 
@@ -196,9 +248,13 @@ function buildChart(): void {
 }
 
 onMounted(buildChart)
-watch(() => props.bars, buildChart, { deep: false })
+// Post-flush: the container only exists once bars render, so build after the DOM updates.
+watch(() => props.bars, buildChart, { deep: false, flush: 'post' })
 watch(() => props.trades, () => {
   if (candleSeries) candleSeries.setMarkers(buildMarkers())
+}, { deep: false })
+watch(() => props.bands, () => {
+  if (bandSeries) bandSeries.setData(buildBandData())
 }, { deep: false })
 watch(viewMode, applyView)
 
@@ -221,8 +277,26 @@ onBeforeUnmount(() => {
         </span>
         <span v-if="latest" class="text-[11px] text-slate-400">{{ formatTime(latest.ts) }} ET</span>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <span class="text-[11px] text-slate-400">{{ bars.length.toLocaleString() }} bars · {{ timeframe }}</span>
+        <div class="flex rounded-lg border border-slate-200 p-0.5 text-[11px]">
+          <button
+            type="button"
+            class="rounded-md px-2 py-1 font-medium transition"
+            :class="source === 'blind' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-800'"
+            @click="emit('update:source', 'blind')"
+          >
+            Blind trades
+          </button>
+          <button
+            type="button"
+            class="rounded-md px-2 py-1 font-medium transition"
+            :class="source === 'hindsight' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800'"
+            @click="emit('update:source', 'hindsight')"
+          >
+            Hindsight trades
+          </button>
+        </div>
         <div class="flex rounded-lg border border-slate-200 p-0.5 text-[11px]">
           <button
             type="button"
@@ -252,7 +326,13 @@ onBeforeUnmount(() => {
       <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-emerald-600" /> target</span>
       <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-rose-600" /> stop</span>
       <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-slate-500" /> timeout</span>
-      <span class="ml-auto">Markers show the recommended rule's simulated trades.</span>
+      <span class="flex items-center gap-1"><span class="h-2.5 w-3 rounded-sm bg-amber-400/40" /> <Term k="watch_state">watching</Term></span>
+      <span class="flex items-center gap-1"><span class="h-2.5 w-3 rounded-sm bg-sky-400/30" /> extended</span>
+      <span class="ml-auto">
+        {{ source === 'blind'
+          ? 'Trades the blind simulation made, with the cutoff it knew at the time.'
+          : 'Trades of the best rule picked with hindsight.' }}
+      </span>
     </div>
   </div>
 </template>

@@ -23,6 +23,21 @@ import type {
 
 const CONFIG_KEY = 'dipwork.analyzer.config.v3'
 const SYMBOL_KEY = 'dipwork.analyzer.symbol.v3'
+const OVERRIDES_KEY = 'dipwork.analyzer.symbolOverrides.v1'
+
+// Per-stock tweaks layered over the global study config. Only the target for
+// now: it is the knob that most changes what a stock can deliver.
+type SymbolOverride = Partial<Pick<AnalysisConfig, 'target_pct'>>
+
+function readOverrides(): Record<string, SymbolOverride> {
+  try {
+    const raw = localStorage.getItem(OVERRIDES_KEY)
+    const parsed = raw ? (JSON.parse(raw) as unknown) : {}
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, SymbolOverride>) : {}
+  } catch {
+    return {}
+  }
+}
 
 function errorMessage(error: unknown): string {
   const axiosError = error as AxiosError<unknown>
@@ -45,6 +60,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const liveRead = ref<SignalRead | null>(null)
   const chartBars = ref<ChartBar[]>([])
   const watchlist = ref<WatchlistItem[]>([])
+  const symbolOverrides = ref<Record<string, SymbolOverride>>(readOverrides())
 
   const initialized = ref(false)
   const loading = ref(false)
@@ -58,6 +74,31 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   )
 
   const hasProfile = computed(() => Boolean(profile.value))
+
+  const symbolOverride = computed<SymbolOverride>(() => symbolOverrides.value[symbol.value] ?? {})
+
+  // The config actually sent for the current symbol.
+  const effectiveConfig = computed<AnalysisConfig | null>(() =>
+    config.value ? { ...config.value, ...symbolOverride.value } : null
+  )
+
+  function setSymbolTarget(target: number | null): void {
+    const next = { ...symbolOverrides.value }
+    const current = { ...(next[symbol.value] ?? {}) }
+    if (target === null || (config.value && target === config.value.target_pct)) {
+      delete current.target_pct
+    } else {
+      current.target_pct = target
+    }
+    if (Object.keys(current).length) next[symbol.value] = current
+    else delete next[symbol.value]
+    symbolOverrides.value = next
+    try {
+      localStorage.setItem(OVERRIDES_KEY, JSON.stringify(next))
+    } catch {
+      // Storage can be unavailable (private mode); the override still applies this session.
+    }
+  }
 
   function saveConfig(): void {
     if (config.value) {
@@ -137,7 +178,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     loading.value = true
     error.value = ''
     try {
-      const result = await analyzeSymbol(symbol.value, config.value, force)
+      const result = await analyzeSymbol(symbol.value, effectiveConfig.value ?? config.value, force)
       profile.value = result
       liveRead.value = result.signal_read
       saveConfig()
@@ -154,7 +195,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     liveLoading.value = true
     error.value = ''
     try {
-      const result = await apiLiveCheck(symbol.value, config.value)
+      const result = await apiLiveCheck(symbol.value, effectiveConfig.value ?? config.value)
       liveRead.value = result.signal_read
       if (profile.value) {
         profile.value = { ...profile.value, signal_read: result.signal_read }
@@ -204,6 +245,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     liveRead,
     chartBars,
     watchlist,
+    symbolOverride,
+    effectiveConfig,
+    setSymbolTarget,
     initialized,
     loading,
     chartLoading,

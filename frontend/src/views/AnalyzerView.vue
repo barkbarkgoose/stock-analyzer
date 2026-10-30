@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import SymbolSearch from '@/components/market/SymbolSearch.vue'
 import ConfigPanel from '@/components/market/ConfigPanel.vue'
@@ -14,6 +14,11 @@ import FakeReboundStudyCard from '@/components/market/FakeReboundStudyCard.vue'
 import ModelPanel from '@/components/market/ModelPanel.vue'
 import TradeTable from '@/components/market/TradeTable.vue'
 import EquityChart from '@/components/market/EquityChart.vue'
+import StrategyCard from '@/components/market/StrategyCard.vue'
+import BlindReplayCard from '@/components/market/BlindReplayCard.vue'
+import BounceProfileCard from '@/components/market/BounceProfileCard.vue'
+import DipHistoryCard from '@/components/market/DipHistoryCard.vue'
+import Term from '@/components/Term.vue'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { useScreenerStore } from '@/stores/screener'
 import { formatDateTime } from '@/utils/format'
@@ -25,6 +30,28 @@ const route = useRoute()
 const router = useRouter()
 
 const profile = computed(() => store.profile)
+
+// The simulation and the true history are kept apart on purpose: one is what
+// you would have gotten trading blind, the other is what the stock did.
+type View = 'blind' | 'history' | 'now'
+const view = ref<View>('blind')
+const chartSource = ref<'blind' | 'hindsight'>('blind')
+const views: Array<{ id: View; label: string; hint: string }> = [
+  { id: 'blind', label: 'Blind simulation', hint: 'what you would have gotten' },
+  { id: 'history', label: 'What actually happened', hint: 'hindsight research' },
+  { id: 'now', label: 'Right now', hint: 'latest bar in detail' }
+]
+
+function selectView(next: View): void {
+  view.value = next
+  if (next === 'blind') chartSource.value = 'blind'
+  if (next === 'history') chartSource.value = 'hindsight'
+}
+
+const chartTrades = computed(() =>
+  (chartSource.value === 'blind' ? profile.value?.blind.trades : profile.value?.trades) ?? []
+)
+const chartBands = computed(() => profile.value?.watch_bands?.[chartSource.value] ?? [])
 const timeframe = computed<Timeframe>(() => (store.config?.timeframe ?? '5m') as Timeframe)
 const timeframes: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '1d']
 const examples = computed(() =>
@@ -138,8 +165,8 @@ onMounted(async () => {
               <span class="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-blue-700 ring-1 ring-blue-200">Signal lab</span>
               <h1 class="mt-3 text-3xl font-semibold tracking-tight text-slate-900">Wait for the dip. Confirm the turn. Take 1%.</h1>
               <p class="mt-3 text-sm leading-relaxed text-slate-600">
-                Build a profile for any ticker to see whether its 5% dips historically rebounded, how often the first bounce was fake,
-                which confirmation rule survived walk-forward testing, and what the next two hours looked like in similar setups.
+                Build a profile for any ticker to get a plain-English strategy for it: when to watch, when to buy, when to sell —
+                and what would have happened if you had followed it blind, without knowing the future.
               </p>
               <div class="mt-5 flex flex-wrap gap-2">
                 <button v-for="example in examples" :key="example" type="button" class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-blue-300 hover:text-blue-700" @click="handleSelect(example)">
@@ -166,30 +193,72 @@ onMounted(async () => {
       </div>
 
       <div v-else class="grid gap-5 lg:grid-cols-12">
-        <aside class="order-2 space-y-4 lg:order-1 lg:col-span-3">
+        <aside class="order-2 min-w-0 space-y-4 lg:order-1 lg:col-span-3">
           <ConfigPanel />
           <DataCoverageCard />
           <div class="card p-4 text-[11px] leading-relaxed text-slate-500">
             <div class="font-semibold text-slate-700">Reading the numbers</div>
-            <p class="mt-1">Hit rate is target-before-stop. Net EV includes costs. Weekly is compounded sequential trades, not a forecast. Walk-forward OOS is the honest estimate.</p>
+            <p class="mt-1">Hit rate is target-before-stop. Net EV includes costs. Weekly is compounded sequential trades, not a forecast. The blind simulation is the honest estimate; hindsight numbers flatter.</p>
             <router-link class="mt-2 inline-block font-medium text-blue-600 hover:text-blue-700" to="/glossary">Full glossary →</router-link>
             <p class="mt-2 text-slate-400">Built {{ profile.cache?.built_at ? formatDateTime(profile.cache.built_at) : formatDateTime(profile.meta.generated_at) }} · engine {{ profile.meta.engine_version }}</p>
           </div>
         </aside>
 
-        <main class="order-1 space-y-5 lg:order-2 lg:col-span-9">
+        <main class="order-1 min-w-0 space-y-5 lg:order-2 lg:col-span-9">
+          <StrategyCard />
           <ReadinessCard />
-          <VerdictCard />
-          <SignalReadCard />
-          <PriceChart :bars="store.chartBars" :trades="profile.trades" :timeframe="profile.meta.timeframe" />
-          <RuleTable />
-          <div class="grid gap-5 xl:grid-cols-2">
-            <FakeReboundStudyCard />
-            <AttemptAnalysisCard />
+          <PriceChart
+            v-model:source="chartSource"
+            :bars="store.chartBars"
+            :trades="chartTrades"
+            :bands="chartBands"
+            :timeframe="profile.meta.timeframe"
+          />
+
+          <div class="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm" role="tablist">
+            <button
+              v-for="item in views"
+              :key="item.id"
+              type="button"
+              role="tab"
+              :aria-selected="view === item.id"
+              class="flex-1 rounded-lg px-3 py-2 text-left transition"
+              :class="view === item.id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'"
+              @click="selectView(item.id)"
+            >
+              <div class="text-sm font-semibold">{{ item.label }}</div>
+              <div class="text-[11px]" :class="view === item.id ? 'text-slate-300' : 'text-slate-400'">{{ item.hint }}</div>
+            </button>
           </div>
-          <ModelPanel />
-          <TradeTable />
-          <EquityChart />
+
+          <template v-if="view === 'blind'">
+            <BlindReplayCard />
+            <TradeTable source="blind" />
+            <EquityChart source="blind" />
+          </template>
+
+          <template v-else-if="view === 'history'">
+            <div class="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-xs leading-relaxed text-slate-500">
+              Everything below looks at the whole history at once. It is the right place to learn how this stock behaves,
+              but rule results here are <Term k="hindsight">hindsight</Term> — the best rule was picked after seeing the outcome.
+            </div>
+            <BounceProfileCard />
+            <DipHistoryCard />
+            <VerdictCard />
+            <RuleTable />
+            <div class="grid gap-5 xl:grid-cols-2">
+              <FakeReboundStudyCard />
+              <AttemptAnalysisCard />
+            </div>
+            <ModelPanel />
+            <TradeTable source="hindsight" />
+            <EquityChart source="hindsight" />
+          </template>
+
+          <template v-else>
+            <SignalReadCard />
+          </template>
+
           <div class="pb-10 text-center text-[11px] text-slate-400">{{ profile.meta.disclaimer }}</div>
         </main>
       </div>

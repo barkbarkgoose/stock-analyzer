@@ -16,7 +16,6 @@ const read = computed(() => store.liveRead ?? store.profile?.signal_read ?? null
 const fastLabel = computed(() => store.profile?.meta.fast_horizon_label ?? 'fast horizon')
 const levels = computed(() => read.value?.levels)
 const firedRules = computed(() => read.value?.fired_rules ?? [])
-const waiting = computed(() => read.value?.waiting_for ?? [])
 const risk = computed(
   () => read.value?.fake_rebound_risk ?? { level: 'n/a', detail: 'No risk read available.' }
 )
@@ -41,14 +40,6 @@ const baseline = computed(() => firedRules.value.find((rule) => rule.baseline))
           </span>
         </div>
         <p class="mt-2 text-sm text-slate-600">{{ read.detail }}</p>
-      </div>
-      <div class="flex shrink-0 gap-2">
-        <button class="btn-secondary text-xs" type="button" :disabled="store.liveLoading" @click="store.refreshLive()">
-          {{ store.liveLoading ? 'Checking…' : 'Live check' }}
-        </button>
-        <button class="btn-secondary text-xs" type="button" @click="store.toggleWatchlist()">
-          {{ store.isWatched ? '★ Watching' : '☆ Watch' }}
-        </button>
       </div>
     </div>
 
@@ -104,7 +95,7 @@ const baseline = computed(() => firedRules.value.find((rule) => rule.baseline))
         </div>
 
         <div class="mt-4">
-          <div class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Confirmations firing</div>
+          <div class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">All rules firing now</div>
           <div v-if="confirmations.length" class="flex flex-wrap gap-1.5">
             <span v-for="rule in confirmations" :key="rule.id" class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200">
               {{ rule.name }}
@@ -113,16 +104,6 @@ const baseline = computed(() => firedRules.value.find((rule) => rule.baseline))
           <div v-else class="text-xs text-slate-500">
             None yet{{ baseline ? ' — the dip baseline is active, but no confirmation has triggered.' : '.' }}
           </div>
-        </div>
-
-        <div class="mt-4">
-          <div class="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Waiting for</div>
-          <ul class="space-y-1 text-xs text-slate-600">
-            <li v-for="item in waiting" :key="item" class="flex items-start gap-1.5">
-              <span class="mt-1 h-1 w-1 shrink-0 rounded-full bg-amber-400" />
-              {{ item }}
-            </li>
-          </ul>
         </div>
       </div>
 
@@ -141,8 +122,8 @@ const baseline = computed(() => firedRules.value.find((rule) => rule.baseline))
             <div class="text-sm font-semibold tabular-nums text-slate-900">{{ formatPercent(read.episode_depth_pct) }}</div>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <div class="text-[10px] uppercase tracking-wide text-slate-400">Off the low</div>
-            <div class="text-sm font-semibold tabular-nums text-slate-900">{{ formatPercent(read.runup_from_low_pct) }}</div>
+            <div class="text-[10px] uppercase tracking-wide text-slate-400">Off the low / cutoff</div>
+            <div class="text-sm font-semibold tabular-nums text-slate-900">{{ formatPercent(read.off_low_pct ?? read.runup_from_low_pct) }} / {{ formatPercent(read.cutoff_pct) }}</div>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
             <div class="text-[10px] uppercase tracking-wide text-slate-400">Attempt</div>

@@ -10,13 +10,16 @@ import {
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { formatSignedPercent } from '@/utils/format'
 
+const props = defineProps<{ source: 'blind' | 'hindsight' }>()
 const store = useAnalyzerStore()
 const container = ref<HTMLElement | null>(null)
 let chart: IChartApi | null = null
 let series: ReturnType<IChartApi['addLineSeries']> | null = null
 let observer: ResizeObserver | null = null
 
-const points = computed(() => store.profile?.equity_curve ?? [])
+const points = computed(() =>
+  (props.source === 'blind' ? store.profile?.blind.equity_curve : store.profile?.equity_curve) ?? []
+)
 const timeframe = computed(() => store.profile?.meta.timeframe ?? '5d')
 const totalReturn = computed(() => {
   const last = points.value[points.value.length - 1]
@@ -97,7 +100,7 @@ function build(): void {
 }
 
 onMounted(build)
-watch(points, build, { deep: false })
+watch(points, build, { deep: false, flush: 'post' })
 onBeforeUnmount(() => {
   observer?.disconnect()
   observer = null
@@ -110,7 +113,7 @@ onBeforeUnmount(() => {
   <div class="card overflow-hidden">
     <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
       <div>
-        <h2 class="text-sm font-semibold text-slate-900">Compounded equity</h2>
+        <h2 class="text-sm font-semibold text-slate-900">{{ source === 'blind' ? 'Blind' : 'Hindsight' }} compounded equity</h2>
         <p class="mt-0.5 text-xs text-slate-500">Sequential trades, full notional, net of costs.</p>
       </div>
       <div class="flex gap-4 text-xs">

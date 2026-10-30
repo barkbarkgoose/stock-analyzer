@@ -12,6 +12,7 @@ export interface AnalysisConfig {
   max_stop_pct: number
   max_hold_days: number
   fast_horizon_minutes: number
+  runup_cutoff_mode: 'auto' | 'fixed'
   max_runup_from_low_pct: number
   attempt_min_pct: number
   episode_max_days: number
@@ -43,6 +44,7 @@ export interface AnalysisConfig {
   walk_forward_folds: number
   min_trades_for_rule: number
   min_trades_for_threshold: number
+  blind_warmup_sessions: number
   enabled_rules: string[] | null
   daily_history_days: number
   intraday_history_days: number
@@ -280,8 +282,13 @@ export interface FiredRule {
   baseline: boolean
 }
 
+export interface ChecklistItem {
+  label: string
+  ok: boolean
+}
+
 export interface SignalRead {
-  state: 'signal' | 'watching' | 'no_setup' | 'no_data'
+  state: 'signal' | 'watching' | 'extended' | 'no_setup' | 'no_data'
   detail: string
   ts?: string
   price?: number
@@ -290,6 +297,9 @@ export interface SignalRead {
   episode_depth_pct?: number
   episode_recovery_pct?: number
   runup_from_low_pct?: number
+  off_low_pct?: number
+  cutoff_pct?: number
+  cutoff_mode?: 'auto' | 'fixed'
   bars_since_episode_low?: number
   attempt_number?: number
   failed_bounces?: number
@@ -309,6 +319,9 @@ export interface SignalRead {
   waiting_for: string[]
   fake_rebound_risk: { level: string; detail: string }
   recommended_rule_id?: string | null
+  recommended_rule_name?: string | null
+  watch_checklist?: ChecklistItem[]
+  buy_checklist?: ChecklistItem[]
 }
 
 export interface Episode {
@@ -324,6 +337,111 @@ export interface Episode {
   recovered: boolean
   duration_bars: number
   max_bounce_pct: number
+}
+
+export interface BounceReach {
+  level_pct: number
+  episodes: number
+  episodes_pct: number
+  legs: number
+  legs_pct: number
+}
+
+export interface BounceProfile {
+  episodes: number
+  legs: number
+  median_biggest_bounce_pct: number | null
+  p25_biggest_bounce_pct: number | null
+  p75_biggest_bounce_pct: number | null
+  median_leg_pct: number | null
+  reach: BounceReach[]
+  cutoff_pct: number
+  cutoff_source: 'auto' | 'fallback' | 'fixed'
+  cutoff_text: string
+  interpretation: string
+}
+
+export interface LadderRow {
+  target_pct: number
+  current: boolean
+  trades: number
+  hit_rate: number | null
+  hit_rate_low: number | null
+  hit_rate_high: number | null
+  net_ev_pct: number | null
+  total_return_pct: number | null
+  weekly_return_pct: number | null
+  max_drawdown_pct: number | null
+  median_holding_minutes: number | null
+  breakeven_hit_rate: number
+}
+
+export interface BlindDecision {
+  session: string
+  rule_id: string | null
+  rule_name: string | null
+  cutoff_pct: number
+  cutoff_source: 'auto' | 'fallback' | 'fixed'
+  train_trades: number
+  train_return_pct: number | null
+  reason: string
+}
+
+export interface BlindReplay {
+  available: boolean
+  reason: string
+  target_pct: number
+  stop_pct: number
+  warmup_sessions: number
+  breakeven_hit_rate: number
+  ladder: LadderRow[]
+  start?: string
+  end?: string
+  summary?: RuleStats | null
+  hindsight_summary?: RuleStats | null
+  trades?: Trade[]
+  equity_curve?: EquityPoint[]
+  decisions?: BlindDecision[]
+  rule_usage?: Array<{ rule_id: string | null; name: string; sessions: number; trades: number }>
+  sessions_decided?: number
+  sessions_sat_out?: number
+  interpretation?: string
+}
+
+export interface Strategy {
+  status: 'active' | 'sit_out'
+  headline: string
+  watch: { text: string }
+  stop_watching: { cutoff_pct: number; source: BounceProfile['cutoff_source']; text: string }
+  buy: { rule_id: string; name: string; plain: string; checks: string[]; text: string } | null
+  sell: {
+    target_pct: number
+    stop_pct: number
+    stop_mode: 'fixed' | 'episode_low'
+    max_hold_days: number
+    text: string
+  }
+  track_record: {
+    trades: number
+    hit_rate: number | null
+    total_return_pct: number | null
+    weekly_return_pct: number | null
+    max_drawdown_pct: number | null
+  }
+  note: string | null
+}
+
+export interface WatchBand {
+  kind: 'watch' | 'extended'
+  start: string
+  end: string
+}
+
+export interface EquityPoint {
+  ts: string
+  equity: number
+  return_pct: number
+  rule_id: string
 }
 
 export interface EpisodeSummary {
@@ -380,7 +498,7 @@ export interface RecommendedInfo {
   family: string
   confirmations: string[]
   stats: RuleStats
-  walk_forward_oos: RuleStats | null
+  blind_summary: RuleStats | null
   selection_reason: string
   use_model_filter: boolean
   threshold: number | null
@@ -466,18 +584,15 @@ export interface Profile {
   rules: RuleStats[]
   recommended: RecommendedInfo | null
   model: ModelInfo
-  walk_forward: {
-    available: boolean
-    reason: string
-    folds: WalkForwardFold[]
-    selected_counts?: Record<string, number>
-    oos?: RuleStats | null
-  }
+  bounce_profile: BounceProfile | null
+  strategy: Strategy | null
+  blind: BlindReplay
+  watch_bands: { hindsight: WatchBand[]; blind: WatchBand[] }
   attempt_analysis: RecommendedInfo['attempt_analysis']
   fake_rebound_study: FakeReboundStudy | null
   signal_read: SignalRead
   trades: Trade[]
-  equity_curve: Array<{ ts: string; equity: number; return_pct: number; rule_id: string }>
+  equity_curve: EquityPoint[]
   warnings: string[]
   cache?: { cached: boolean; data_version: number; built_at: string }
 }

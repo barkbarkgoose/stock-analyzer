@@ -13,7 +13,6 @@ type Tab = 'overview' | 'calibration' | 'thresholds' | 'walk'
 const store = useAnalyzerStore()
 const activeTab = ref<Tab>('overview')
 const model = computed(() => store.profile?.model)
-const ruleWalk = computed(() => store.profile?.walk_forward)
 
 const features = computed(() => (model.value?.features ?? []).slice(0, 10))
 const maxImportance = computed(() =>
@@ -292,48 +291,6 @@ const tabs: Array<{ id: Tab; label: string }> = [
                 </tr>
               </tbody>
             </table>
-          </div>
-        </div>
-
-        <div v-if="ruleWalk?.folds?.length">
-          <div class="mb-2 flex items-center justify-between">
-            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Rule-selection folds</h3>
-            <span class="text-[10px] text-slate-400">train picks a rule; test measures it</span>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="min-w-full text-left text-xs">
-              <thead class="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-400">
-                <tr>
-                  <th class="px-2 py-2 font-medium">Fold</th>
-                  <th class="px-2 py-2 font-medium">Test start</th>
-                  <th class="px-2 py-2 font-medium">Selected</th>
-                  <th class="px-2 py-2 text-right font-medium">Train trades</th>
-                  <th class="px-2 py-2 text-right font-medium">Test trades</th>
-                  <th class="px-2 py-2 text-right font-medium">Hit</th>
-                  <th class="px-2 py-2 text-right font-medium">Net EV</th>
-                  <th class="px-2 py-2 text-right font-medium">Weekly</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                <tr v-for="fold in ruleWalk.folds" :key="fold.fold">
-                  <td class="px-2 py-2 tabular-nums">{{ fold.fold }}</td>
-                  <td class="px-2 py-2 text-slate-500">{{ fold.test_start?.slice(0, 10) }}</td>
-                  <td class="px-2 py-2 font-medium text-slate-700">{{ fold.selected_rule || '—' }}</td>
-                  <td class="px-2 py-2 text-right tabular-nums">{{ fold.train_trades ?? '—' }}</td>
-                  <td class="px-2 py-2 text-right tabular-nums">{{ fold.test_trades ?? '—' }}</td>
-                  <td class="px-2 py-2 text-right tabular-nums">{{ formatRate(fold.test_hit_rate) }}</td>
-                  <td class="px-2 py-2 text-right tabular-nums">{{ formatSignedPercent(fold.test_net_ev_pct) }}</td>
-                  <td class="px-2 py-2 text-right tabular-nums">{{ formatSignedPercent(fold.test_weekly_return_pct) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-if="ruleWalk.oos" class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            OOS selection process:
-            <span class="font-semibold text-slate-900">{{ ruleWalk.oos.trades }} trades</span>,
-            hit {{ formatRate(ruleWalk.oos.hit_rate) }},
-            net EV {{ formatSignedPercent(ruleWalk.oos.net_ev_pct) }},
-            {{ formatSignedPercent(ruleWalk.oos.weekly_return_pct) }}/wk.
           </div>
         </div>
       </div>

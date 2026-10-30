@@ -90,7 +90,7 @@ function bulletTone(toneValue: string): string {
       </div>
     </div>
     <p class="mt-3 text-[11px] text-slate-500">
-      Readiness requires a qualified trend, enough sequential trades, a positive walk-forward estimate, and a hit-rate interval above 50%. It is still a historical estimate.
+      Readiness requires a qualified trend, enough trades in the blind simulation, a net-positive blind result, and a hit-rate interval above 50%. It is still a historical estimate.
     </p>
   </div>
 </template>

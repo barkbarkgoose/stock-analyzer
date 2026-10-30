@@ -12,13 +12,22 @@ import {
 } from '@/utils/format'
 
 type Filter = 'all' | 'wins' | 'stops' | 'timeouts'
+const props = defineProps<{ source: 'blind' | 'hindsight' }>()
 const store = useAnalyzerStore()
 const filter = ref<Filter>('all')
 const showAll = ref(false)
 
-const stats = computed(() => store.profile?.recommended?.stats)
+const isBlind = computed(() => props.source === 'blind')
+const stats = computed(() =>
+  isBlind.value ? store.profile?.blind.summary : store.profile?.recommended?.stats
+)
 const timeframe = computed(() => store.profile?.meta.timeframe ?? '5m')
-const trades = computed(() => [...(store.profile?.trades ?? [])].reverse())
+const trades = computed(() =>
+  [...((isBlind.value ? store.profile?.blind.trades : store.profile?.trades) ?? [])].reverse()
+)
+const ruleNames = computed(
+  () => new Map((store.profile?.rules ?? []).map((rule) => [rule.rule_id, rule.name ?? rule.rule_id]))
+)
 const filtered = computed(() => {
   if (filter.value === 'wins') return trades.value.filter((trade) => trade.success)
   if (filter.value === 'stops') return trades.value.filter((trade) => trade.exit_reason === 'stop')
@@ -38,9 +47,12 @@ function reasonTone(reason: string): string {
   <div class="card overflow-hidden">
     <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
       <div>
-        <h2 class="text-sm font-semibold text-slate-900">Simulated trade log</h2>
+        <h2 class="text-sm font-semibold text-slate-900">{{ isBlind ? 'Blind trade log' : 'Hindsight trade log' }}</h2>
         <p class="mt-0.5 text-xs text-slate-500">
-          Recommended rule, one position at a time. Entry is the next bar's open; stop-first on ambiguous bars.
+          {{ isBlind
+            ? 'Every trade the blind simulation made, with the rule it had chosen that day.'
+            : 'The best rule picked after seeing all the history.' }}
+          One position at a time. Entry is the next bar's open; stop-first on ambiguous bars.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -57,7 +69,7 @@ function reasonTone(reason: string): string {
     </div>
 
     <div v-if="!trades.length" class="p-5 text-sm text-slate-400">
-      No simulated trades for the recommended rule.
+      {{ isBlind ? 'The blind simulation made no trades.' : 'No simulated trades for the recommended rule.' }}
     </div>
 
     <div v-else class="overflow-x-auto">
@@ -65,12 +77,13 @@ function reasonTone(reason: string): string {
         <thead class="border-b border-slate-100 bg-slate-50/70 text-[10px] uppercase tracking-wide text-slate-400">
           <tr>
             <th class="px-3 py-2 font-medium">Entry</th>
+            <th v-if="isBlind" class="px-2 py-2 font-medium">Rule</th>
             <th class="px-2 py-2 text-right font-medium">Price</th>
             <th class="px-2 py-2 text-right font-medium">Exit</th>
             <th class="px-2 py-2 text-right font-medium">Return</th>
             <th class="px-2 py-2 font-medium">Reason</th>
             <th class="px-2 py-2 text-right font-medium">Hold</th>
-            <th class="px-2 py-2 text-right font-medium">P(win)</th>
+            <th v-if="!isBlind" class="px-2 py-2 text-right font-medium">P(win)</th>
             <th class="px-2 py-2 text-right font-medium">Attempt</th>
             <th class="px-2 py-2 text-right font-medium">Failed</th>
             <th class="px-2 py-2 text-right font-medium">Run-up</th>
@@ -81,6 +94,7 @@ function reasonTone(reason: string): string {
         <tbody class="divide-y divide-slate-100">
           <tr v-for="trade in visible" :key="`${trade.signal_index}-${trade.entry_ts}`" class="hover:bg-slate-50">
             <td class="whitespace-nowrap px-3 py-2 text-slate-600">{{ formatDateTime(trade.entry_ts) }}</td>
+            <td v-if="isBlind" class="whitespace-nowrap px-2 py-2 text-slate-600">{{ ruleNames.get(trade.rule_id) ?? trade.rule_id }}</td>
             <td class="px-2 py-2 text-right tabular-nums text-slate-700">{{ formatMoney(trade.entry_price) }}</td>
             <td class="px-2 py-2 text-right tabular-nums text-slate-700">{{ formatMoney(trade.exit_price) }}</td>
             <td class="px-2 py-2 text-right font-semibold tabular-nums" :class="trade.net_return_pct >= 0 ? 'text-emerald-700' : 'text-rose-700'">
@@ -92,7 +106,7 @@ function reasonTone(reason: string): string {
               </span>
             </td>
             <td class="px-2 py-2 text-right tabular-nums text-slate-500">{{ formatHold(trade.holding_trading_minutes, timeframe) }}</td>
-            <td class="px-2 py-2 text-right tabular-nums text-slate-500">{{ formatRate(trade.probability) }}</td>
+            <td v-if="!isBlind" class="px-2 py-2 text-right tabular-nums text-slate-500">{{ formatRate(trade.probability) }}</td>
             <td class="px-2 py-2 text-right tabular-nums text-slate-500">#{{ trade.features.attempt_number }}</td>
             <td class="px-2 py-2 text-right tabular-nums text-slate-500">{{ trade.features.failed_bounces_1pct }}</td>
             <td class="px-2 py-2 text-right tabular-nums text-slate-500">{{ formatPercent(trade.features.runup_from_low_pct) }}</td>

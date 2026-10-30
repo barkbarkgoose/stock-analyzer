@@ -65,4 +65,22 @@ body {
   .help-tip__body {
     @apply mt-0.5 block text-slate-300;
   }
+
+  /* Numbered step heading on the strategy card. */
+  .step-label {
+    @apply flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  .step-num {
+    @apply flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white;
+  }
+
+  /* Live checklist marker: grey until the condition is met. */
+  .check-dot {
+    @apply mt-px flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[9px] font-bold text-slate-400;
+  }
+
+  .check-dot--ok {
+    @apply bg-emerald-100 text-emerald-700;
+  }
 }

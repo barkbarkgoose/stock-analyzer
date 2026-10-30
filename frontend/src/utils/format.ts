@@ -96,6 +96,8 @@ export function statusTone(status: string | null | undefined): string {
       return 'bg-amber-50 text-amber-700 ring-amber-200'
     case 'reject':
       return 'bg-rose-50 text-rose-700 ring-rose-200'
+    case 'extended':
+      return 'bg-sky-50 text-sky-700 ring-sky-200'
     default:
       return 'bg-slate-100 text-slate-600 ring-slate-200'
   }

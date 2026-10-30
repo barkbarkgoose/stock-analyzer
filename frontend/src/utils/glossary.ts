@@ -28,7 +28,28 @@ export const GLOSSARY = {
     term: 'Dip episode',
     short: 'One ≥5% drop, tracked as a single event.',
     detail:
-      'A drawdown of 5% or more starts an episode. A bounce that then makes a new low does not start a fresh episode — it counts as another attempt. The episode ends when price closes back above the pre-dip high, or after a maximum duration.',
+      'A drawdown of 5% or more starts an episode. A bounce that then makes a new low does not start a fresh episode — it counts as another attempt. For bookkeeping the episode ends when price closes back above the pre-dip high, or after a maximum duration — but trading does not wait for that: buys stop at the bounce cutoff and every trade sells at its own target.',
+    group: 'Signals & setup'
+  },
+  watch_state: {
+    term: 'Watch / extended',
+    short: 'Watch: in a dip with bounce room left. Extended: bounced past the cutoff.',
+    detail:
+      'Watch means the stock is in a qualifying dip and has not yet bounced past its cutoff, so a buy is allowed once the rule confirms. Extended means it is still in the dip but has already bounced far enough that little room is usually left — wait for a pullback. The chart shades both.',
+    group: 'Signals & setup'
+  },
+  bounce_cutoff: {
+    term: 'Bounce cutoff',
+    short: 'How far off the dip low we still allow a buy.',
+    detail:
+      'Measured from the dip low. In auto mode it is learned per stock: take the bounce that 3 in 4 past dips reached, subtract the target. Past that point there is usually less than a full target of room left, so the stock moves from watch to extended.',
+    group: 'Signals & setup'
+  },
+  bounce_reach: {
+    term: 'Bounce reach',
+    short: 'Share of past dips whose bounce got at least this far off the low.',
+    detail:
+      '"Dips" counts the best bounce in each dip. "Attempts" counts every bounce leg, including fake ones that rolled over into a new low. A target is realistic when most dips reach comfortably past it.',
     group: 'Signals & setup'
   },
   attempt: {
@@ -252,8 +273,36 @@ export const GLOSSARY = {
     term: 'Walk-forward folds',
     short: 'Repeated train-then-test splits across the history.',
     detail:
-      'The history is cut into successive windows: pick the rule on one, measure on the next, roll forward, repeat. Consistent results across folds are more convincing than one good overall number.',
+      'The history is cut into successive windows: fit on one, measure on the next, roll forward, repeat. The probability model is validated this way. Rule selection uses the stricter blind simulation instead.',
     group: 'Model & validation'
+  },
+  blind_replay: {
+    term: 'Blind simulation',
+    short: 'The strategy traded through history without seeing the future.',
+    detail:
+      'Walks forward one session at a time. Each morning it picks the buy rule (best net-positive record among trades that had already closed) and the bounce cutoff (from dips that had already finished), then trades that day. It never sees a bar after the moment it acts. This is the number to trust.',
+    group: 'Model & validation'
+  },
+  hindsight: {
+    term: 'Hindsight',
+    short: 'Results using the rule picked after seeing the whole history.',
+    detail:
+      'The historical analysis looks at everything at once and picks the best rule, which flatters it. Useful for understanding how the stock behaves, not for judging the strategy. The gap between hindsight and blind is the cost of not knowing the future.',
+    group: 'Model & validation'
+  },
+  breakeven: {
+    term: 'Break-even hit rate',
+    short: 'Win rate needed just to not lose money at this target and stop.',
+    detail:
+      'With a +1% target and a -2% stop you need to win about 2 of every 3 trades to break even (more after costs). A +2% target with the same stop needs only about half. Bigger targets win less often but need fewer wins.',
+    group: 'Results & metrics'
+  },
+  target_ladder: {
+    term: 'Target ladder',
+    short: 'The blind simulation re-run at several targets.',
+    detail:
+      'Each row is a complete blind simulation at that target (same stop). Use it to see whether a higher target is realistic for this stock. Choosing the best row by eye is itself a little hindsight, so prefer a target whose neighbours also do well.',
+    group: 'Results & metrics'
   }
 } satisfies Record<string, GlossaryEntry>
 
