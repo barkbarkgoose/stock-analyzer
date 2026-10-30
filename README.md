@@ -113,7 +113,7 @@ cd ..
 cd backend && ../.venv/bin/python manage.py add_user you@example.com --name "You"
 ```
 
-The runner finds free ports starting at `8800` (Django) and `5177` (Vite), applies migrations, and stops both on Ctrl+C. Open `http://localhost:5177`. The dev runner is development-only; for the hosted setup (Docker, Postgres, Caddy on one DigitalOcean droplet) see [docs/DEPLOY.md](docs/DEPLOY.md).
+The runner finds free ports starting at `8800` (Django) and `5177` (Vite), applies migrations, and stops both on Ctrl+C. Open `http://localhost:5177`. The dev runner is development-only; for hosting it (Docker + Postgres on a DigitalOcean droplet, a Google Cloud VM, or a machine at home) see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ### Choosing a provider
 

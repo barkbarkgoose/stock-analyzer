@@ -2,13 +2,18 @@
 # One-time (re-runnable) setup for a fresh Ubuntu 24.04 droplet. Run from the
 # repo checkout, normally /opt/stonks, as your sudo user:
 #
-#   sudo scripts/server-setup.sh [--domain stonks.allbarker.com] [--ssh-from CIDR]
+#   sudo scripts/server-setup.sh [--domain stonks.allbarker.com] [--ssh-from CIDR] [--proxy caddy|none]
 #   sudo scripts/server-setup.sh --harden-ssh      # later, after key login is confirmed
 #
 # Installs Docker, Caddy and firewall rules, adds swap, writes /etc/stonks/app.env
 # with fresh secrets (never overwrites an existing one), installs the Caddy
 # site and the backup/backfill timers. It does not deploy; run
 # `sudo scripts/ops.sh deploy` afterwards.
+#
+# --proxy none skips Caddy and keeps 80/443 closed, for when something else
+# terminates HTTPS and forwards to 127.0.0.1:8000 (e.g. Tailscale Funnel).
+# --ssh-from 100.64.0.0/10 limits SSH to your Tailscale devices.
+# See docs/DEPLOY.md for the DigitalOcean, Google Cloud and home setups.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,6 +21,7 @@ DOMAIN="stonks.allbarker.com"
 SSH_FROM=""
 ADMIN_USER="${SUDO_USER:-}"
 HARDEN_SSH=0
+PROXY="caddy"
 
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo; echo "==> $*"; }
@@ -26,10 +32,12 @@ while [[ $# -gt 0 ]]; do
     --ssh-from) SSH_FROM="$2"; shift 2 ;;
     --admin-user) ADMIN_USER="$2"; shift 2 ;;
     --harden-ssh) HARDEN_SSH=1; shift ;;
+    --proxy) PROXY="$2"; shift 2 ;;
     *) sed -n '2,12p' "$0"; exit 1 ;;
   esac
 done
 
+[[ "$PROXY" == caddy || "$PROXY" == none ]] || die "--proxy must be caddy or none"
 [[ $EUID -eq 0 ]] || die "run with sudo"
 [[ -n "$ADMIN_USER" && "$ADMIN_USER" != root ]] || die "run via sudo from your admin user (or pass --admin-user NAME)"
 id "$ADMIN_USER" >/dev/null 2>&1 || die "user $ADMIN_USER does not exist"
@@ -81,8 +89,8 @@ fi
 systemctl enable --now docker >/dev/null
 docker compose version
 
-log "Caddy"
-if ! command -v caddy >/dev/null 2>&1; then
+if [[ "$PROXY" == caddy ]] && ! command -v caddy >/dev/null 2>&1; then
+  log "Caddy"
   apt-get install -y -q debian-keyring debian-archive-keyring apt-transport-https >/dev/null
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
     | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -109,11 +117,19 @@ ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 if [[ -n "$SSH_FROM" ]]; then
   ufw allow from "$SSH_FROM" to any port 22 proto tcp >/dev/null
+  # Narrowing SSH must actually close the wide-open rule from an earlier run.
+  ufw delete allow OpenSSH >/dev/null 2>&1 || true
 else
   ufw allow OpenSSH >/dev/null
 fi
-ufw allow 80/tcp >/dev/null
-ufw allow 443/tcp >/dev/null
+if [[ "$PROXY" == caddy ]]; then
+  ufw allow 80/tcp >/dev/null
+  ufw allow 443/tcp >/dev/null
+else
+  # Nothing public listens here; drop rules a previous caddy-mode run added.
+  ufw delete allow 80/tcp >/dev/null 2>&1 || true
+  ufw delete allow 443/tcp >/dev/null 2>&1 || true
+fi
 ufw --force enable >/dev/null
 ufw status verbose
 
@@ -143,17 +159,22 @@ PY
   echo "POSTGRES_PASSWORD into your password manager: sudo cat /etc/stonks/app.env"
 fi
 
-log "Caddy site for $DOMAIN"
-tmp="$(mktemp)"
-sed "s/^stonks\.allbarker\.com {/$DOMAIN {/" "$REPO_DIR/deploy/stonks/Caddyfile" > "$tmp"
-if ! cmp -s "$tmp" /etc/caddy/Caddyfile 2>/dev/null; then
-  [[ -f /etc/caddy/Caddyfile ]] && cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%Y%m%d%H%M%S)"
-  install -m 0644 "$tmp" /etc/caddy/Caddyfile
+if [[ "$PROXY" == caddy ]]; then
+  log "Caddy site for $DOMAIN"
+  tmp="$(mktemp)"
+  sed "s/^stonks\.allbarker\.com {/$DOMAIN {/" "$REPO_DIR/deploy/stonks/Caddyfile" > "$tmp"
+  if ! cmp -s "$tmp" /etc/caddy/Caddyfile 2>/dev/null; then
+    [[ -f /etc/caddy/Caddyfile ]] && cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%Y%m%d%H%M%S)"
+    install -m 0644 "$tmp" /etc/caddy/Caddyfile
+  fi
+  rm -f "$tmp"
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+  systemctl enable caddy >/dev/null
+  systemctl reload-or-restart caddy
+elif systemctl is-active --quiet caddy 2>/dev/null; then
+  log "stopping Caddy (--proxy none)"
+  systemctl disable --now caddy >/dev/null
 fi
-rm -f "$tmp"
-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
-systemctl enable caddy >/dev/null
-systemctl reload-or-restart caddy
 
 log "backups directory and timers"
 install -d -m 2750 -o root -g "$ADMIN_USER" /var/backups/stonks
@@ -165,11 +186,16 @@ systemctl enable --now stonks-backup.timer stonks-backfill.timer >/dev/null
 systemctl list-timers 'stonks-*' --no-pager
 
 ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | cut -d' ' -f1)"
+if [[ "$PROXY" == caddy ]]; then
+  first="DNS: point an A record for $DOMAIN at $ip
+     (check with: dig +short A $DOMAIN). Caddy fetches the certificate once it resolves."
+else
+  first="Publish 127.0.0.1:8000 as https://$DOMAIN, e.g.: sudo tailscale funnel --bg 8000"
+fi
 cat <<EOF
 
 Setup complete. Next:
-  1. DNS: point an A record for $DOMAIN at $ip
-     (check with: dig +short A $DOMAIN). Caddy fetches the certificate once it resolves.
+  1. $first
   2. Deploy:          sudo scripts/ops.sh deploy
   3. Create a login:  sudo scripts/ops.sh add-user you@example.com --name "Your Name"
   4. When key login works from a new terminal:  sudo scripts/server-setup.sh --harden-ssh
