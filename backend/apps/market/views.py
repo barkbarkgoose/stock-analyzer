@@ -1,8 +1,8 @@
 """Market research API.
 
-These endpoints are intentionally open (AllowAny): this is a local, single-user
-research workbench.  If it is ever exposed beyond localhost, put it behind the
-existing JWT auth (or a reverse-proxy auth layer).
+Every endpoint requires a logged-in user (the DRF default, IsAuthenticated with
+JWT).  Analyses trigger provider fetches and CPU-heavy builds, so they must not
+be reachable anonymously once the app is on the public internet.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from django.conf import settings
 from django.utils import timezone as django_timezone
 from rest_framework import status
 from rest_framework.exceptions import NotFound, ValidationError
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -78,7 +77,6 @@ def _iso(value):
 
 
 class ConfigView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request):
         try:
@@ -113,7 +111,6 @@ class ConfigView(APIView):
 
 
 class SymbolSearchView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request):
         query = request.query_params.get("q", "")
@@ -121,7 +118,6 @@ class SymbolSearchView(APIView):
 
 
 class AnalyzeView(APIView):
-    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = AnalyzeSerializer(data=request.data)
@@ -141,7 +137,6 @@ class AnalyzeView(APIView):
 
 
 class ProfileView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request, symbol: str):
         config_hash = request.query_params.get("config_hash")
@@ -165,7 +160,6 @@ class ProfileView(APIView):
 
 
 class CoverageView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request, symbol: str):
         timeframe = request.query_params.get("timeframe", "5m")
@@ -176,7 +170,6 @@ class CoverageView(APIView):
 
 
 class IngestView(APIView):
-    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = IngestSerializer(data=request.data)
@@ -216,7 +209,6 @@ class IngestView(APIView):
 
 
 class ChartView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request, symbol: str):
         serializer = ChartQuerySerializer(data=request.query_params)
@@ -253,7 +245,6 @@ class ChartView(APIView):
 
 
 class WatchlistView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request):
         items = WatchlistItem.objects.select_related("security").all()
@@ -278,7 +269,6 @@ class WatchlistView(APIView):
 
 
 class WatchlistDetailView(APIView):
-    permission_classes = [AllowAny]
 
     def delete(self, request, symbol: str):
         deleted, _ = WatchlistItem.objects.filter(
@@ -290,7 +280,6 @@ class WatchlistDetailView(APIView):
 
 
 class LiveCheckView(APIView):
-    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = LiveCheckSerializer(data=request.data)
@@ -366,7 +355,6 @@ class LiveCheckView(APIView):
 
 
 class ScreenStartView(APIView):
-    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = ScreenStartSerializer(data=request.data)
@@ -424,7 +412,6 @@ class ScreenStartView(APIView):
 
 
 class ScreenRunView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request, pk: int):
         try:
@@ -444,7 +431,6 @@ class ScreenRunView(APIView):
 
 
 class ScreenLatestView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request):
         runs = ScreenRun.objects.order_by("-created_at")[:10]
@@ -467,7 +453,6 @@ class ScreenLatestView(APIView):
 
 
 class UniverseView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request):
         universe = request.query_params.get("universe", "default")
@@ -475,7 +460,6 @@ class UniverseView(APIView):
 
 
 class PaperTickView(APIView):
-    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = PaperTickSerializer(data=request.data)
@@ -494,7 +478,6 @@ class PaperTickView(APIView):
 
 
 class PaperTradesView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request):
         qs = PaperTrade.objects.select_related("security").all()
@@ -508,14 +491,12 @@ class PaperTradesView(APIView):
 
 
 class PaperStatsView(APIView):
-    permission_classes = [AllowAny]
 
     def get(self, request):
         return Response(paper_stats())
 
 
 class PaperCloseView(APIView):
-    permission_classes = [AllowAny]
 
     def post(self, request, pk: int):
         try:

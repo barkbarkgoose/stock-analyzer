@@ -2,14 +2,43 @@ from __future__ import annotations
 
 
 import pytest
+from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
 from apps.market.models import Bar, FetchLog, PaperTrade, ScreenRun, WatchlistItem
 
 
 @pytest.fixture
-def api() -> APIClient:
-    return APIClient()
+def api(db) -> APIClient:
+    client = APIClient()
+    user = get_user_model().objects.create_user(
+        email="analyst@example.com", name="Analyst", password="Sup3r-secret-pw"
+    )
+    client.force_authenticate(user=user)
+    return client
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "method,url",
+    [
+        ("get", "/api/v1/market/config"),
+        ("post", "/api/v1/market/analyze"),
+        ("get", "/api/v1/market/watchlist"),
+        ("post", "/api/v1/market/paper/tick"),
+        ("post", "/api/v1/market/screen"),
+    ],
+)
+def test_market_api_requires_login(method: str, url: str) -> None:
+    response = getattr(APIClient(), method)(url, {}, format="json")
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_health_is_public() -> None:
+    response = APIClient().get("/health/")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def _analyze_payload(symbol: str = "DEMO", **config) -> dict:

@@ -3,28 +3,10 @@ export interface LoginRequest {
   password: string
 }
 
-export interface RegisterRequest {
-  email: string
-  password: string
-  name: string
-  organization_name?: string
-}
-
 export interface LoginResponse {
   access: string
   refresh: string
   user?: User
-}
-
-export interface RegisterResponse {
-  id: number
-  email: string
-  name: string
-  organization: {
-    id: number
-    name: string
-  } | null
-  token: string
 }
 
 export interface ApiKeyStatus {

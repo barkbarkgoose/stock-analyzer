@@ -44,19 +44,12 @@ class TestAuthViews:
 
 
 @pytest.mark.django_db
-class TestRegistration:
+def test_self_registration_is_disabled(api_client):
+    # Accounts are created by an operator (manage.py add_user), never from the web.
     payload = {"email": "new@example.com", "password": "Sup3r-secret-pw", "name": "New"}
-
-    def test_register_without_organization(self, api_client):
-        response = api_client.post("/api/v1/auth/register/", self.payload, format="json")
-        assert response.status_code == 201
-        assert response.data["organization"] is None
-
-    def test_register_with_organization(self, api_client):
-        data = {**self.payload, "organization_name": "Acme"}
-        response = api_client.post("/api/v1/auth/register/", data, format="json")
-        assert response.status_code == 201
-        assert response.data["organization"]["name"] == "Acme"
+    response = api_client.post("/api/v1/auth/register/", payload, format="json")
+    assert response.status_code == 404
+    assert not User.objects.filter(email="new@example.com").exists()
 
 
 @pytest.mark.django_db
@@ -158,3 +151,39 @@ class TestUserSettingsAPI:
 
         assert response.status_code == 200
         assert response.data["api_keys_status"]["openai"]["is_configured"] is False
+
+
+@pytest.mark.django_db
+class TestAddUserCommand:
+    def _run(self, monkeypatch, passwords, *args):
+        from django.core.management import call_command
+
+        answers = iter(passwords)
+        monkeypatch.setattr("getpass.getpass", lambda prompt="": next(answers))
+        call_command("add_user", *args)
+
+    def test_creates_a_user_who_can_log_in(self, monkeypatch, api_client):
+        self._run(monkeypatch, [VALID_PASSWORD, VALID_PASSWORD], "me@example.com", "--name", "Me")
+        user = User.objects.get(email="me@example.com")
+        assert not user.is_staff
+        response = api_client.post(
+            "/api/v1/auth/login/",
+            {"email": "me@example.com", "password": VALID_PASSWORD},
+            format="json",
+        )
+        assert response.status_code == 200
+
+    def test_admin_flag(self, monkeypatch):
+        self._run(monkeypatch, [VALID_PASSWORD, VALID_PASSWORD], "boss@example.com", "--name", "Boss", "--admin")
+        assert User.objects.get(email="boss@example.com").is_superuser
+
+    def test_rejects_mismatch_weak_and_duplicate(self, monkeypatch, sample_user):
+        from django.core.management.base import CommandError
+
+        with pytest.raises(CommandError, match="did not match"):
+            self._run(monkeypatch, [VALID_PASSWORD, "other"], "a@example.com", "--name", "A")
+        with pytest.raises(CommandError):
+            self._run(monkeypatch, ["123", "123"], "a@example.com", "--name", "A")
+        with pytest.raises(CommandError, match="already exists"):
+            self._run(monkeypatch, [VALID_PASSWORD, VALID_PASSWORD], sample_user.email, "--name", "Dup")
+        assert not User.objects.filter(email="a@example.com").exists()

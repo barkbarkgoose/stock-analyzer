@@ -71,7 +71,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleDocumentClick)
             <span class="hidden text-sm font-semibold tracking-tight text-slate-900 sm:block">Dipwork</span>
           </router-link>
 
-          <div class="flex min-w-0 items-center gap-0.5 overflow-x-auto">
+          <div v-if="isAuthenticated" class="flex min-w-0 items-center gap-0.5 overflow-x-auto">
             <router-link
               v-for="item in navItems"
               :key="item.path"

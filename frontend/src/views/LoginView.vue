@@ -42,10 +42,7 @@ async function handleSubmit() {
           Sign in to your account
         </h2>
         <p class="mt-2 text-center text-sm text-gray-600">
-          Or
-          <router-link to="/register" class="font-medium text-blue-600 hover:text-blue-500">
-            create a new account
-          </router-link>
+          Accounts are created by the administrator.
         </p>
       </div>
 

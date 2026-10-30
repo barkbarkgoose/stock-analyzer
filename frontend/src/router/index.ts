@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { refreshAccessToken } from '@/services/api'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -37,19 +38,12 @@ const routes: RouteRecordRaw[] = [
     path: '/login',
     name: 'login',
     component: () => import('@/views/LoginView.vue'),
-    meta: { requiresGuest: true }
-  },
-  {
-    path: '/register',
-    name: 'register',
-    component: () => import('@/views/RegisterView.vue'),
-    meta: { requiresGuest: true }
+    meta: { requiresGuest: true, public: true }
   },
   {
     path: '/settings',
     name: 'settings',
-    component: () => import('@/views/SettingsView.vue'),
-    meta: { requiresAuth: true }
+    component: () => import('@/views/SettingsView.vue')
   },
   {
     path: '/dashboard',
@@ -62,17 +56,23 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, _from, next) => {
+// Every page except /login needs a session. An expired access token is
+// renewed from the refresh token before giving up and showing /login.
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
   authStore.loadFromStorage()
 
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next({ name: 'login', query: { redirect: to.fullPath } })
-  } else if (to.meta.requiresGuest && authStore.isAuthenticated) {
-    next({ name: 'home' })
-  } else {
-    next()
+  if (!authStore.isAuthenticated && !to.meta.public) {
+    if (await refreshAccessToken()) authStore.loadFromStorage()
   }
+
+  if (!to.meta.public && !authStore.isAuthenticated) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (to.meta.requiresGuest && authStore.isAuthenticated) {
+    return { name: 'home' }
+  }
+  return true
 })
 
 export default router

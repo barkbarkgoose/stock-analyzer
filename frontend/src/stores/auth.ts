@@ -3,9 +3,7 @@ import { ref, computed } from 'vue'
 import type {
   User,
   LoginCredentials,
-  RegisterRequest,
   LoginResponse,
-  RegisterResponse,
   UserSettings,
   UserSettingsUpdate
 } from '@/types/auth'
@@ -38,7 +36,14 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Treat a missing or expired/malformed access token as logged out so the
     // router guard can redirect to /login instead of leaving the UI broken.
+    // Keep a still-valid refresh token, though: the guard uses it to get a new
+    // access token silently instead of sending the user back to /login.
     if (!storedToken || isTokenExpired(storedToken)) {
+      const refresh = localStorage.getItem(REFRESH_KEY)
+      if (refresh && !isTokenExpired(refresh)) {
+        token.value = null
+        return
+      }
       clearAuthState()
       return
     }
@@ -113,18 +118,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function register(payload: RegisterRequest): Promise<void> {
-    const response = await api.post<RegisterResponse>('/api/v1/auth/register/', payload)
-    token.value = response.data.token
-    localStorage.setItem(TOKEN_KEY, response.data.token)
-    storeUser({
-      id: response.data.id,
-      email: response.data.email,
-      name: response.data.name,
-      organization: response.data.organization
-    })
-  }
-
   function logout(): void {
     clearAuthState()
   }
@@ -139,7 +132,6 @@ export const useAuthStore = defineStore('auth', () => {
     updateUserSettings,
     saveApiKey,
     login,
-    register,
     logout
   }
 })

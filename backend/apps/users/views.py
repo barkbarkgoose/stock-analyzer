@@ -9,7 +9,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .serializers import (
     LoginSerializer,
-    RegisterSerializer,
     UserSerializer,
     UserSettingsSerializer,
     format_safe_user_settings,
@@ -56,24 +55,6 @@ class UserSettingsView(APIView):
             format_safe_user_settings(request.user.settings),
             status=status.HTTP_200_OK,
         )
-
-
-class RegisterView(APIView):
-    """Register a new user with organization."""
-
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-
-        refresh = RefreshToken.for_user(user)
-
-        user_data = UserSerializer(user).data
-        user_data["token"] = str(refresh.access_token)
-
-        return Response(user_data, status=status.HTTP_201_CREATED)
 
 
 class LoginView(APIView):
