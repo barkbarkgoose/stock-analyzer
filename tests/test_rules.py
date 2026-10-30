@@ -62,3 +62,31 @@ def test_daily_rules_exclude_vwap() -> None:
     ids = {rule.id for rule in available_rules(config)}
     assert "vwap_reclaim" not in ids
     assert "composite_balanced" in ids
+
+
+def test_checklist_is_exactly_the_trigger() -> None:
+    from stock_rebound_analyzer.rules import RULES
+
+    variants = [
+        row(),
+        row(higher_low=False),
+        row(green_bar=False),
+        row(volume_ratio20=0.9),
+        row(new_low_recent=True),
+        row(failed_bounces=0, failed_bounces_1pct=0),
+        row(runup_from_low_pct=0.1),
+        row(ema9_cross_up=True, vwap_cross_up=True, rsi_cross_up_30=False),
+    ]
+    for rule in RULES:
+        for r in variants:
+            checks = rule.checklist(r)
+            assert all(item["ok"] for item in checks) == rule.evaluate(r)
+
+
+def test_bounce_cutoff_uses_the_dip_low() -> None:
+    config = AnalysisConfig(timeframe="5m", exclude_first_minutes=0, max_runup_from_low_pct=2.0)
+    rule = RULE_BY_ID["green_reclaim"]
+    assert evaluates(row(episode_recovery_pct=1.9), rule, config)
+    # Far off the dip low: no bounce room left, even if the 2-day rolling
+    # run-up looks small.
+    assert not evaluates(row(episode_recovery_pct=2.1, runup_from_low_pct=0.5), rule, config)

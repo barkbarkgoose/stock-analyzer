@@ -4,7 +4,7 @@ A single-purpose research tool for one question:
 
 > **For a volatile stock in an uptrend, after a >=5% dip, when can we confirm that the rebound has actually started — and how often does +1% get hit before the stop, within one or two trading days?**
 
-Dipwork is not a trading bot and does not place orders. It builds a **profile** for a symbol: how its dips behave, how often the first bounce is fake, which confirmation rule survives walk-forward testing, what the next two hours looked like in similar setups, and what a sequential paper-trade simulation would have done.
+Dipwork is not a trading bot and does not place orders. It builds a **profile** for a symbol: a plain-English **strategy** for that stock (when to watch, when to buy, when to sell), how far its dips actually bounce, and — kept separate — what would have happened if you had followed the strategy **blind**, day by day, without knowing the future.
 
 ---
 
@@ -20,11 +20,12 @@ Dipwork models that sequence explicitly.
 
 1. **Uptrend filter** — price above/near SMA50, SMA50 above SMA200, price above SMA200, positive 6-month return, controlled 1-year drawdown, not over-extended.
 2. **Volatility filter** — enough 5% intraday range days and/or ATR, plus liquidity.
-3. **Multi-leg dip episode** — a 5% drawdown starts an episode. A bounce followed by a new low does **not** start a fresh episode; it increments the failed-bounce / attempt count. The episode ends only on a close above the pre-dip reference high or after a maximum duration. This is how fake rebounds become a feature instead of a surprise.
-4. **Confirmation rules** — higher low, swing-high reclaim, 9-EMA reclaim, session VWAP reclaim, volume expansion, RSI reclaim, and composites. The baseline is “buy every dip bar”, so every confirmation has to beat it.
-5. **Triple-barrier labels** — enter at the **next bar’s open**, target `+1%`, stop `-2%` (configurable or structure-based), max hold `2 trading days`. If target and stop are both inside one bar, the stop is assumed first. Slippage and commission are included.
-6. **Walk-forward selection** — rules are chosen on a training window and measured on the next window, with an outcome-based embargo so labels cannot leak across the boundary.
-7. **Probability model** — a small L2 logistic regression estimates `P(target before stop)` and a separate fast-horizon model estimates `P(hit within the next 2 hours)`. Features include the dip-episode state, confirmation quality, volatility/time-of-day, and the prior day / two-day return and range from completed daily bars. It is deliberately transparent, with coefficients, calibration and walk-forward folds in the UI. The probability cutoff is selected on the first 60% of walk-forward OOS predictions and evaluated on the held-out 40%. If there are not enough samples, it says so instead of pretending.
+3. **Multi-leg dip episode** — a 5% drawdown starts an episode. A bounce followed by a new low does **not** start a fresh episode; it increments the failed-bounce / attempt count. For bookkeeping the episode ends on a close above the pre-dip reference high or after a maximum duration — but trading never waits for a full recovery: buys stop at the **bounce cutoff** and every trade sells at its own target. This is how fake rebounds become a feature instead of a surprise.
+4. **Bounce cutoff (watch window)** — the stock is in *watch* while it is in a dip and has not yet bounced past the cutoff, measured from the dip's own low. Past it the stock is *extended*: the easy part of the bounce is gone. In `auto` mode the cutoff is learned per stock: the bounce that 3 in 4 past dips reached, minus the target. The profile shows the full "how far do dips bounce" table.
+5. **Confirmation rules** — higher low, swing-high reclaim, 9-EMA reclaim, session VWAP reclaim, volume expansion, RSI reclaim, and composites. The baseline is “buy every dip bar”, so every confirmation has to beat it.
+6. **Triple-barrier labels** — enter at the **next bar’s open**, target `+1%`, stop `-2%` (configurable or structure-based), max hold `2 trading days`. If target and stop are both inside one bar, the stop is assumed first. Slippage and commission are included.
+7. **Blind simulation** — walks forward one session at a time. Each morning it picks the buy rule (best net-positive record among trades that had already *closed*) and the bounce cutoff (from dips that had already *finished*), then trades that day, one position at a time. It sits out when no rule has earned trust yet. It re-runs at several targets (+1/1.5/2/2.5%) so you can see whether a higher target is realistic for a stock. A test proves that cutting off future bars never changes an earlier decision. This replaces the old fold-based rule walk-forward.
+8. **Probability model** — a small L2 logistic regression estimates `P(target before stop)` and a separate fast-horizon model estimates `P(hit within the next 2 hours)`. Features include the dip-episode state, confirmation quality, volatility/time-of-day, and the prior day / two-day return and range from completed daily bars. It is deliberately transparent, with coefficients, calibration and walk-forward folds in the UI. The probability cutoff is selected on the first 60% of walk-forward OOS predictions and evaluated on the held-out 40%. If there are not enough samples, it says so instead of pretending.
 
 The profile reports both **signal-level** statistics (all raw signals) and **sequential trade** statistics (one position at a time). Headline metrics use sequential trades; the conditional tables use all signals so you can see the attempt/depth/time-of-day splits.
 
@@ -32,10 +33,13 @@ The profile reports both **signal-level** statistics (all raw signals) and **seq
 
 ## What the workbench shows
 
+- **Strategy card** — the per-stock playbook in four steps (watch → stop watching → buy → sell), each with a live ✓/✗ checklist against the latest bar, the blind track record, and a per-stock target picker. If no rule has a net-positive record the card says *sit out* and the paper trader will not trade it.
+- **Blind simulation tab** — blind trades, equity curve, the daily decisions it made, the gap to hindsight, and the target ladder.
+- **What actually happened tab** — the true history, labelled as hindsight: bounce profile, every dip that happened, the rule comparison, fake-rebound and attempt studies, the model.
 - **Automation readiness** — a plain-language verdict: promising / fragile / needs more data / no demonstrated edge / not qualified, with the exact OOS, fake-rebound, time-in-market and model evidence behind it.
 - **Verdict** — qualified / watch / reject, score, every qualification check.
 - **Current read** — active dip episode, attempt number, failed bounces, off-the-low run-up, waiting-for list, fake-rebound risk, entry/target/stop levels, model probabilities.
-- **Price chart** — candles, volume, and markers for the recommended rule’s simulated buys/targets/stops.
+- **Price chart** — candles, volume, shaded *watch* / *extended* periods, and buy/target/stop markers from either the blind simulation or the hindsight rule.
 - **Rule comparison** — trades, hit rate + Wilson CI, net EV/trade, weekly return, trades/week, stop rate, fast-horizon hit rate, median time in market, max drawdown, rank score. Click a rule for attempt/depth/time/run-up splits.
 - **Fake-rebound study** — baseline first attempt vs confirmed first attempt, and baseline vs confirmed after a failed bounce.
 - **Attempt analysis** — first vs second vs third+ attempt, and no-failed-bounce vs failed-bounce splits.
@@ -219,7 +223,8 @@ curl -X POST http://127.0.0.1:8800/api/v1/market/analyze \
 - **Trades/week** — how often the rule actually traded inside the window.
 - **Median hold** — market minutes in the trade, excluding overnight gaps. This is the “minimal time in market” metric.
 - **Fast hit rate** — share of trades that hit target within the fast horizon (default 2 hours on 5m).
-- **Walk-forward OOS** — the rule was selected on earlier data and measured on later data. This is the number to trust most. The readiness verdict requires it to be positive with a hit-rate interval above 50% before calling a setup promising.
+- **Blind simulation** — the strategy traded with no knowledge of the future. This is the number to trust most. The readiness verdict requires it to be net positive with a hit-rate interval above 50% before calling a setup promising. The rule table and hindsight trade log pick the best rule after seeing everything, so they flatter; the gap between the two is the cost of not knowing the future.
+- **Break-even hit rate** — the win rate needed just to not lose money at a given target and stop, after costs (~70% for +1%/-2%, ~53% for +2%/-2%).
 - **Model AUC / Brier** — ranking quality and calibration. AUC near 0.5 means the model adds little; Brier near the base rate means it is not calibrated.
 - **No recommended rule** — if no confirmation rule produced the minimum number of sequential trades, the profile deliberately shows no recommendation. The rule table is still there for exploration, but the tool will not pretend it found an edge.
 - **Fake-rebound study** — compares buying the raw first attempt with buying a confirmed first attempt. If confirmation does not improve the first-attempt hit rate in your sample, the tool says so.
@@ -239,6 +244,8 @@ stock_rebound_analyzer/     Pure Python research engine
   rules.py                  Confirmation rule registry
   labels.py                 Triple-barrier labels (next-open entry, stop-first)
   backtest.py               Sequential trade simulation
+  bounces.py                Bounce profile + per-stock bounce cutoff
+  blind.py                  Blind day-by-day replay, target ladder, watch bands
   model.py                  Logistic probability model + walk-forward
   profile.py                The profile JSON consumed by the UI/API
 backend/apps/market/        Django persistence, ingestion, API, paper trading
@@ -269,7 +276,7 @@ The engine tests cover causality (truncating future bars does not change earlier
 ## Limits and honest caveats
 
 - **Historical research only.** Past behaviour does not guarantee future results. Nothing here is financial advice.
-- **Free intraday data is short.** Yahoo’s 5m window is ~58 usable days. A 60-day profile is a small sample; use walk-forward results and confidence intervals, not a single hit rate.
+- **Free intraday data is short.** Yahoo’s 5m window is ~58 usable days. A 60-day profile is a small sample; use the blind simulation and confidence intervals, not a single hit rate. Picking a target from the ladder by eye is itself a little hindsight.
 - **IEX is not consolidated.** Alpaca free-tier volume/spread conclusions are approximate.
 - **Adjusted data.** Yahoo uses auto-adjusted OHLC; Alpaca uses the configured adjustment. Splits/dividends can differ across providers, which is why switching sources resets the cache.
 - **Execution assumptions.** Next-bar-open entry, configured slippage, stop-first on ambiguous bars, one position at a time, no borrow/shorting, no taxes. Paper fills are simulated at the latest close + slippage.

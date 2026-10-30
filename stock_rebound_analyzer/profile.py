@@ -13,13 +13,21 @@ from .backtest import (
     simulate_with_probabilities,
 )
 from .bars import normalize_bars, resample_daily
+from .blind import (
+    LADDER_TARGETS,
+    breakeven_hit_rate,
+    prepare,
+    run_blind,
+    watch_bands,
+)
+from .bounces import bounce_profile, resolve_cutoff
 from .config import AnalysisConfig
 from .daily import build_daily_contexts, build_daily_profile
 from .features import FeatureSeries, build_features
 from .indicators import session_date
 from .labels import label_all
 from .model import predict_probability, train_model
-from .rules import available_rules, is_candidate_bar
+from .rules import RULE_BY_ID, SignalRule, available_rules, is_candidate_bar
 from .signal_read import build_signal_read
 from .stats import equity_curve, geometric_total, summarize_rule, threshold_curve
 from .types import (
@@ -32,7 +40,7 @@ from .types import (
     SimulatedTrade,
 )
 
-ENGINE_VERSION = "3.5"
+ENGINE_VERSION = "4.0"
 DISCLAIMER = (
     "Historical research only. Past behaviour does not guarantee future results; "
     "this tool does not place orders."
@@ -255,132 +263,6 @@ def _split_blocks(items: Sequence[Any], blocks: int) -> list[list[Any]]:
     return out
 
 
-def _walk_forward(
-    rule_stats: dict[str, RuleStats],
-    baseline_samples: Sequence[SignalSample],
-    data_start: datetime,
-    data_end: datetime,
-    config: AnalysisConfig,
-) -> dict[str, Any]:
-    times = [sample.ts for sample in baseline_samples]
-    if len(times) < 30:
-        return {
-            "available": False,
-            "reason": "Fewer than 30 candidate bars; not enough to walk forward.",
-            "folds": [],
-            "oos": None,
-        }
-    n_folds = min(config.walk_forward_folds, max(2, len(times) // 30))
-    blocks = _split_blocks(times, n_folds + 1)
-    folds: list[dict[str, Any]] = []
-    oos_trades: list[SimulatedTrade] = []
-    selected_counts: dict[str, int] = {}
-    first_test_start: datetime | None = None
-    last_test_end: datetime | None = None
-
-    for fold_index in range(1, len(blocks)):
-        test_block = blocks[fold_index]
-        if len(test_block) < 5:
-            continue
-        test_start = test_block[0]
-        if first_test_start is None:
-            first_test_start = test_start
-        if fold_index + 1 < len(blocks) and blocks[fold_index + 1]:
-            test_end = blocks[fold_index + 1][0]
-        else:
-            test_end = data_end
-        last_test_end = test_end
-
-        best_rule: str | None = None
-        best_score = -math.inf
-        best_train_trades: list[SimulatedTrade] = []
-        best_train_weekly = 0.0
-        for rule_id, stats in rule_stats.items():
-            train_trades = [
-                trade
-                for trade in stats.trade_list
-                if trade.outcome.exit_ts < test_start
-            ]
-            if len(train_trades) < config.min_trades_for_rule:
-                continue
-            weekly = _weekly_return(train_trades, data_start, test_start)
-            shrink = len(train_trades) / (len(train_trades) + 10.0)
-            score = weekly * shrink
-            if score > best_score:
-                best_score = score
-                best_rule = rule_id
-                best_train_trades = train_trades
-                best_train_weekly = weekly
-
-        if best_rule is None:
-            folds.append(
-                {
-                    "fold": fold_index,
-                    "test_start": _iso(test_start),
-                    "test_end": _iso(test_end),
-                    "selected_rule": None,
-                    "reason": "No rule had enough training trades.",
-                }
-            )
-            continue
-
-        selected_counts[best_rule] = selected_counts.get(best_rule, 0) + 1
-        stats = rule_stats[best_rule]
-        test_trades = [
-            trade
-            for trade in stats.trade_list
-            if test_start <= trade.outcome.entry_ts < test_end
-        ]
-        oos_trades.extend(test_trades)
-        test_weeks = max(0.5, (test_end - test_start).total_seconds() / 86_400.0 / 7.0)
-        test_returns = [trade.outcome.net_return_pct for trade in test_trades]
-        test_successes = sum(1 for trade in test_trades if trade.outcome.success)
-        folds.append(
-            {
-                "fold": fold_index,
-                "test_start": _iso(test_start),
-                "test_end": _iso(test_end),
-                "selected_rule": best_rule,
-                "train_trades": len(best_train_trades),
-                "train_weekly_return_pct": best_train_weekly,
-                "test_trades": len(test_trades),
-                "test_trades_per_week": len(test_trades) / test_weeks,
-                "test_hit_rate": (
-                    test_successes / len(test_trades) if test_trades else 0.0
-                ),
-                "test_net_ev_pct": mean(test_returns) if test_returns else 0.0,
-                "test_weekly_return_pct": _weekly_return(
-                    test_trades, test_start, test_end
-                ),
-                "test_stop_rate": (
-                    mean(1.0 if t.outcome.is_stop else 0.0 for t in test_trades)
-                    if test_trades
-                    else 0.0
-                ),
-            }
-        )
-
-    oos_summary: dict[str, Any] | None = None
-    if oos_trades and first_test_start is not None and last_test_end is not None:
-        oos_stats = summarize_rule(
-            "walk_forward_selection",
-            _samples_from_trades(oos_trades),
-            oos_trades,
-            period_start=first_test_start,
-            period_end=last_test_end,
-            timeframe=config.timeframe,
-        )
-        oos_summary = _stats_summary(oos_stats, _rank_score(oos_stats))
-    return {
-        "available": bool(folds),
-        "reason": "" if folds else "No fold had enough training trades.",
-        "folds": folds,
-        "selected_counts": selected_counts,
-        "oos": oos_summary,
-    }
-
-
-
 def _episode_summary(episodes: Sequence[EpisodeRecord], weeks: float) -> dict[str, Any]:
     if not episodes:
         return {
@@ -502,7 +384,7 @@ def _automation_readiness(
     *,
     qualification_status: str,
     recommended_stats: RuleStats | None,
-    walk_forward: dict[str, Any],
+    blind_summary: dict[str, Any] | None,
     fake_rebound_study: dict[str, Any] | None,
     model: ModelEvaluation,
     rule_stats: dict[str, RuleStats],
@@ -513,12 +395,12 @@ def _automation_readiness(
     """A plain-language answer to: could this be automated accurately?
 
     This is deliberately conservative.  It requires (1) a qualified uptrend,
-    (2) enough sequential trades, and (3) a positive *walk-forward* estimate
+    (2) enough sequential trades, and (3) a positive *blind replay* result
     with a hit-rate confidence interval that does not straddle 50%.  A good
-    in-sample rule is not enough.
+    in-sample (hindsight) rule is not enough.
     """
 
-    oos = walk_forward.get("oos") or {}
+    oos = blind_summary or {}
     max_rule_trades = max((s.trades for s in rule_stats.values()), default=0)
     oos_trades = int(oos.get("trades") or 0)
     oos_hit_low = float(oos.get("hit_rate_low") or 0.0)
@@ -541,33 +423,33 @@ def _automation_readiness(
     elif oos_trades == 0:
         status = "needs_more_data"
         summary = (
-            "There is no walk-forward out-of-sample evidence yet. More sequential "
-            "trades (or a longer intraday cache) are needed before judging automation accuracy."
+            "The blind replay has not traded yet: no buy rule had earned a positive "
+            "track record in time. More history (a longer intraday cache) is needed."
         )
     elif oos_trades < config.min_trades_for_threshold:
         status = "needs_more_data"
         summary = (
-            f"Only {oos_trades} walk-forward OOS trades were available. That is too "
-            "few to estimate automation accuracy with confidence."
+            f"The blind replay only made {oos_trades} trades. That is too few to "
+            "judge whether the strategy works on this stock."
         )
     elif oos_weekly <= 0 or oos_net_ev <= 0:
         status = "no_edge"
         summary = (
-            "The walk-forward selection process was not net positive after costs. "
-            "Do not automate this signal on this sample."
+            "Traded blind (no knowledge of the future), the strategy lost money "
+            "after costs. Do not automate it on this sample."
         )
     elif oos_hit_low < 0.5:
         status = "fragile"
         summary = (
-            "The OOS edge is positive, but the hit-rate confidence interval crosses "
-            "50%. Treat it as fragile and gather more data before automating."
+            "Traded blind, the strategy made money, but the hit-rate confidence "
+            "interval crosses 50%. Treat it as fragile and gather more data."
         )
     else:
         status = "promising"
         summary = (
-            "The walk-forward selection process was net positive after costs, with a "
-            "hit-rate interval above 50%. This is the strongest evidence the tool can "
-            "give — still historical, not a guarantee."
+            "Traded blind (no knowledge of the future), the strategy made money after "
+            "costs with a hit-rate interval above 50%. This is the strongest evidence "
+            "the tool can give — still historical, not a guarantee."
         )
 
     score = 0.0
@@ -592,7 +474,7 @@ def _automation_readiness(
     if oos:
         bullets.append(
             {
-                "label": "Walk-forward OOS",
+                "label": "Blind replay",
                 "value": (
                     f"{oos_trades} trades · {oos_hit:.0%} hit "
                     f"[{float(oos.get('hit_rate_low') or 0):.0%}–"
@@ -604,7 +486,7 @@ def _automation_readiness(
         )
     else:
         bullets.append(
-            {"label": "Walk-forward OOS", "value": "Not available yet", "tone": "warn"}
+            {"label": "Blind replay", "value": "No trades yet", "tone": "warn"}
         )
     if fake_rebound_study:
         bullets.append(
@@ -632,7 +514,7 @@ def _automation_readiness(
         )
         bullets.append(
             {
-                "label": "In-sample rule",
+                "label": "Hindsight best rule",
                 "value": (
                     f"{recommended_stats.trades} trades · {recommended_stats.hit_rate:.0%} hit · "
                     f"{recommended_stats.weekly_return_pct:+.2f}%/wk"
@@ -746,6 +628,238 @@ def _data_summary(
     }
 
 
+def _summarize_trades(
+    rule_id: str,
+    trades: Sequence[SimulatedTrade],
+    start: datetime,
+    end: datetime,
+    timeframe: str,
+) -> dict[str, Any] | None:
+    if not trades:
+        return None
+    stats = summarize_rule(
+        rule_id,
+        _samples_from_trades(trades),
+        trades,
+        period_start=start,
+        period_end=end,
+        timeframe=timeframe,
+    )
+    return _stats_summary(stats, _rank_score(stats))
+
+
+def _blind_section(
+    *,
+    rows: Sequence[FeatureRow],
+    bars: Sequence[Bar],
+    episodes: Sequence[EpisodeRecord],
+    rules: Sequence[SignalRule],
+    config: AnalysisConfig,
+    hindsight_trades: Sequence[SimulatedTrade],
+) -> dict[str, Any]:
+    """Blind replay at the chosen target, plus a ladder of other targets."""
+
+    prep = prepare(rows, rules, config)
+    main = None
+    ladder: list[dict[str, Any]] = []
+    for target in sorted({*LADDER_TARGETS, config.target_pct}):
+        is_current = math.isclose(target, config.target_pct)
+        cfg = config if is_current else config.with_overrides(target_pct=target)
+        result = run_blind(prep, label_all(list(bars), list(rows), cfg), episodes, cfg)
+        if is_current:
+            main = result
+        summary = (
+            _summarize_trades("blind_replay", result.trades, result.start, result.end, cfg.timeframe)
+            if result.start and result.end
+            else None
+        ) or {}
+        ladder.append(
+            {
+                "target_pct": target,
+                "current": is_current,
+                "trades": summary.get("trades", 0),
+                "hit_rate": summary.get("hit_rate"),
+                "hit_rate_low": summary.get("hit_rate_low"),
+                "hit_rate_high": summary.get("hit_rate_high"),
+                "net_ev_pct": summary.get("net_ev_pct"),
+                "total_return_pct": summary.get("total_return_pct"),
+                "weekly_return_pct": summary.get("weekly_return_pct"),
+                "max_drawdown_pct": summary.get("max_drawdown_pct"),
+                "median_holding_minutes": summary.get("median_holding_minutes"),
+                "breakeven_hit_rate": breakeven_hit_rate(cfg),
+            }
+        )
+    assert main is not None
+
+    base = {
+        "target_pct": config.target_pct,
+        "stop_pct": config.stop_pct,
+        "warmup_sessions": config.blind_warmup_sessions,
+        "breakeven_hit_rate": breakeven_hit_rate(config),
+        "ladder": ladder,
+        "_bands": watch_bands(rows, config, main.row_cutoff),
+    }
+    if main.start is None or main.end is None:
+        return {**base, "available": False, "reason": main.reason}
+
+    summary = _summarize_trades(
+        "blind_replay", main.trades, main.start, main.end, config.timeframe
+    )
+    hindsight_window = [t for t in hindsight_trades if t.outcome.entry_ts >= main.start]
+    hindsight_summary = _summarize_trades(
+        "hindsight", hindsight_window, main.start, main.end, config.timeframe
+    )
+
+    usage: dict[str | None, dict[str, Any]] = {}
+    for decision in main.decisions:
+        entry = usage.setdefault(
+            decision["rule_id"], {"rule_id": decision["rule_id"], "sessions": 0, "trades": 0}
+        )
+        entry["sessions"] += 1
+    for trade in main.trades:
+        usage.setdefault(trade.rule_id, {"rule_id": trade.rule_id, "sessions": 0, "trades": 0})
+        usage[trade.rule_id]["trades"] += 1
+    for entry in usage.values():
+        rule = RULE_BY_ID.get(entry["rule_id"] or "")
+        entry["name"] = rule.name if rule else "Sitting out"
+
+    if not main.trades:
+        interpretation = (
+            "Traded blind, the simulated trader never found a buy rule it could trust "
+            "in time, so it made no trades. That is a legitimate answer: on this "
+            "history it would have sat out."
+        )
+    else:
+        wins = sum(1 for t in main.trades if t.outcome.success)
+        stops = sum(1 for t in main.trades if t.outcome.is_stop)
+        other = len(main.trades) - wins - stops
+        total = (summary or {}).get("total_return_pct", 0.0)
+        interpretation = (
+            f"Trading blind from {main.start.date().isoformat()}, the strategy made "
+            f"{len(main.trades)} trades: {wins} hit the +{config.target_pct:g}% target"
+            f"{f', {other} ran out of time' if other else ''} and {stops} were stopped "
+            f"out. Total {total:+.2f}% after costs."
+        )
+        if hindsight_summary:
+            interpretation += (
+                " Picking the best rule with hindsight would have made "
+                f"{hindsight_summary['total_return_pct']:+.2f}% over the same days; "
+                "the gap is the cost of not knowing the future."
+            )
+
+    return {
+        **base,
+        "available": True,
+        "reason": "",
+        "start": _iso(main.start),
+        "end": _iso(main.end),
+        "summary": summary,
+        "hindsight_summary": hindsight_summary,
+        "trades": [_trade_to_dict(t) for t in main.trades[-500:]],
+        "equity_curve": equity_curve(main.trades[-500:]),
+        "decisions": [
+            {
+                **d,
+                "session": d["session"].isoformat(),
+                "rule_name": (RULE_BY_ID[d["rule_id"]].name if d["rule_id"] else None),
+            }
+            for d in main.decisions
+        ],
+        "rule_usage": sorted(usage.values(), key=lambda e: -e["sessions"]),
+        "sessions_decided": len(main.decisions),
+        "sessions_sat_out": sum(1 for d in main.decisions if d["rule_id"] is None),
+        "interpretation": interpretation,
+    }
+
+
+def _strategy(
+    *,
+    symbol: str,
+    config: AnalysisConfig,
+    rule: SignalRule | None,
+    bounces: dict[str, Any],
+    blind: dict[str, Any],
+    min_trades: int,
+) -> dict[str, Any]:
+    """The per-stock playbook in plain English."""
+
+    watch = (
+        f"Watch when {symbol} is down at least {config.dip_threshold_pct:g}% from its "
+        f"high of the last {config.dip_lookback_days:g} trading days"
+    )
+    if config.only_uptrend_signals:
+        watch += f" and its daily uptrend score is at least {config.uptrend_min_score:g}"
+    watch += "."
+
+    if config.stop_mode == "episode_low":
+        sell = (
+            f"Sell at +{config.target_pct:g}% (target), just below the dip low "
+            f"(stop, kept between {config.min_stop_pct:g}% and {config.max_stop_pct:g}% "
+            f"under entry), or after {config.max_hold_days:g} trading days — whichever "
+            "comes first."
+        )
+    else:
+        sell = (
+            f"Sell at +{config.target_pct:g}% (target), at -{config.stop_pct:g}% (stop), "
+            f"or after {config.max_hold_days:g} trading days — whichever comes first."
+        )
+
+    summary = blind.get("summary") or {}
+    track = {
+        "trades": summary.get("trades", 0),
+        "hit_rate": summary.get("hit_rate"),
+        "total_return_pct": summary.get("total_return_pct"),
+        "weekly_return_pct": summary.get("weekly_return_pct"),
+        "max_drawdown_pct": summary.get("max_drawdown_pct"),
+    }
+
+    buy = None
+    if rule is not None:
+        buy = {
+            "rule_id": rule.id,
+            "name": rule.name,
+            "plain": rule.plain,
+            "checks": list(rule.confirmations),
+            "text": f"Buy at the next bar's open when {rule.plain}.",
+        }
+        status = "active"
+        headline = (
+            f"Watch the dip, buy on the {rule.name} signal, take +{config.target_pct:g}%."
+        )
+    else:
+        status = "sit_out"
+        headline = "Sit out for now."
+
+    return {
+        "status": status,
+        "headline": headline,
+        "watch": {"text": watch},
+        "stop_watching": {
+            "cutoff_pct": config.max_runup_from_low_pct,
+            "source": bounces.get("cutoff_source"),
+            "text": bounces.get("cutoff_text"),
+        },
+        "buy": buy,
+        "sell": {
+            "target_pct": config.target_pct,
+            "stop_pct": config.stop_pct,
+            "stop_mode": config.stop_mode,
+            "max_hold_days": config.max_hold_days,
+            "text": sell,
+        },
+        "track_record": track,
+        "note": (
+            None
+            if rule is not None
+            else (
+                f"No buy rule has at least {min_trades} trades with a net-positive "
+                "record on this stock yet. Try a different target, or let more history "
+                "accumulate."
+            )
+        ),
+    }
+
+
 def build_profile(
     *,
     symbol: str,
@@ -809,7 +923,10 @@ def build_profile(
             "rules": [],
             "recommended": None,
             "model": {"available": False, "reason": "No data."},
-            "walk_forward": {"available": False, "reason": "No data.", "folds": []},
+            "blind": {"available": False, "reason": "No data."},
+            "bounce_profile": None,
+            "strategy": None,
+            "watch_bands": {"hindsight": [], "blind": []},
             "attempt_analysis": None,
             "fake_rebound_study": None,
             "signal_read": {"state": "no_data", "detail": "No bars available."},
@@ -879,11 +996,10 @@ def build_profile(
             "rules": [],
             "recommended": None,
             "model": {"available": False, "reason": "No feature rows."},
-            "walk_forward": {
-                "available": False,
-                "reason": "No feature rows.",
-                "folds": [],
-            },
+            "blind": {"available": False, "reason": "No feature rows."},
+            "bounce_profile": None,
+            "strategy": None,
+            "watch_bands": {"hindsight": [], "blind": []},
             "attempt_analysis": None,
             "fake_rebound_study": None,
             "signal_read": {"state": "no_data", "detail": "No feature rows."},
@@ -891,6 +1007,13 @@ def build_profile(
             "equity_curve": [],
             "warnings": warnings + ["No feature rows could be built."],
         }
+
+    # The bounce cutoff is per stock in auto mode.  The hindsight analysis
+    # uses the cutoff learned from every finished dip; the blind replay keeps
+    # the configured fallback and re-learns the cutoff as dips finish.
+    blind_config = effective_config
+    cutoff, _ = resolve_cutoff(series.episodes, effective_config)
+    effective_config = effective_config.with_overrides(max_runup_from_low_pct=cutoff)
 
     outcomes = label_all(analysis_bars, rows, effective_config)
     rules = available_rules(effective_config)
@@ -918,21 +1041,28 @@ def build_profile(
         for stats in rule_stats.values()
         if stats.trades >= effective_config.min_trades_for_rule
     ]
-    ranked = sorted(
-        rule_stats.values(),
-        key=_rank_score if eligible else lambda s: (s.trades, s.signals),
-        reverse=True,
-    )
-    recommended_stats = ranked[0] if eligible else None
+    # The rule to use from here on: same test the blind trader applies each
+    # morning — enough trades, net positive, best rank score.  The buy-every-
+    # dip baseline is a yardstick, never a strategy.
+    trusted = [
+        stats
+        for stats in eligible
+        if stats.rule_id != "dip_close" and stats.total_return_pct > 0
+    ]
+    recommended_stats = max(trusted, key=_rank_score) if trusted else None
     recommended_rule = (
         next((r for r in rules if r.id == recommended_stats.rule_id), None)
         if recommended_stats
         else None
     )
 
-    baseline_samples = samples_by_rule.get("dip_close", [])
-    walk_forward = _walk_forward(
-        rule_stats, baseline_samples, period_start, period_end, effective_config
+    blind = _blind_section(
+        rows=rows,
+        bars=analysis_bars,
+        episodes=series.episodes,
+        rules=rules,
+        config=blind_config,
+        hindsight_trades=recommended_stats.trade_list if recommended_stats else [],
     )
 
     model = ModelEvaluation(available=False, reason="No eligible signal rule.")
@@ -1180,6 +1310,11 @@ def build_profile(
             f"{effective_config.min_trades_for_rule} sequential trades. The rule "
             "comparison is exploratory only; there is no recommended signal."
         )
+    elif not trusted:
+        warnings.append(
+            "No buy rule made money over this window, so there is no strategy to "
+            "follow: the right move on this stock is to sit out."
+        )
     if not model.available:
         warnings.append(
             "Probability model unavailable: " + (model.reason or "insufficient samples.")
@@ -1190,7 +1325,13 @@ def build_profile(
             f"{daily_profile.get('qualification', {}).get('status', 'unknown')}; "
             "treat this as a research candidate, not a confirmed uptrend."
         )
-    if recommended_rule and recommended_rule.id == "dip_close":
+    baseline_stats = rule_stats.get("dip_close")
+    if (
+        recommended_stats
+        and baseline_stats
+        and baseline_stats.trades >= effective_config.min_trades_for_rule
+        and _rank_score(baseline_stats) > _rank_score(recommended_stats)
+    ):
         warnings.append(
             "No confirmation rule beat the buy-every-dip baseline in this sample; "
             "the signal edge is unproven."
@@ -1256,7 +1397,7 @@ def build_profile(
             "family": recommended_rule.family,
             "confirmations": list(recommended_rule.confirmations),
             "stats": recommended_summary,
-            "walk_forward_oos": walk_forward.get("oos"),
+            "blind_summary": blind.get("summary"),
             "selection_reason": selection_reason,
             "use_model_filter": use_model_filter,
             "threshold": model.recommended_threshold if use_model_filter else None,
@@ -1279,6 +1420,7 @@ def build_profile(
         1.0, (period_end - period_start).total_seconds() / 86_400.0 / 7.0
     )
     episode_summary = _episode_summary(list(series.episodes), weeks)
+    bounces = bounce_profile(series.episodes, effective_config)
     fake_rebound_study = _fake_rebound_study(
         rule_stats.get("dip_close"), recommended_stats
     )
@@ -1287,7 +1429,7 @@ def build_profile(
             "status", "reject"
         ),
         recommended_stats=recommended_stats,
-        walk_forward=walk_forward,
+        blind_summary=blind.get("summary"),
         fake_rebound_study=fake_rebound_study,
         model=model,
         rule_stats=rule_stats,
@@ -1319,11 +1461,24 @@ def build_profile(
         "daily": daily_profile,
         "episodes": _episodes_to_dict(series.episodes),
         "episode_summary": episode_summary,
+        "bounce_profile": bounces,
+        "strategy": _strategy(
+            symbol=symbol,
+            config=effective_config,
+            rule=recommended_rule,
+            bounces=bounces,
+            blind=blind,
+            min_trades=effective_config.min_trades_for_rule,
+        ),
+        "blind": blind,
+        "watch_bands": {
+            "hindsight": watch_bands(rows, effective_config, [cutoff] * len(rows)),
+            "blind": blind.pop("_bands", []),
+        },
         "automation_readiness": readiness,
         "rules": rule_summaries,
         "recommended": recommended,
         "model": model_dict,
-        "walk_forward": walk_forward,
         "attempt_analysis": attempt_analysis,
         "fake_rebound_study": fake_rebound_study,
         "signal_read": signal_read,

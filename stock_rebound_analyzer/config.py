@@ -31,6 +31,11 @@ class AnalysisConfig:
     max_stop_pct: float = 4.0
     max_hold_days: float = 2.0
     fast_horizon_minutes: int = 120
+    # Stop watching a dip once price is this far off the dip low: the easy part
+    # of the bounce is gone.  In "auto" mode the cutoff is set per stock from
+    # how far its past dips bounced (typical bounce minus the target), and this
+    # value is only the fallback when there are too few past dips.
+    runup_cutoff_mode: str = "auto"  # auto | fixed
     max_runup_from_low_pct: float = 3.0
 
     attempt_min_pct: float = 0.4
@@ -69,6 +74,8 @@ class AnalysisConfig:
     walk_forward_folds: int = 4
     min_trades_for_rule: int = 5
     min_trades_for_threshold: int = 8
+    # Blind replay: sessions observed before the simulated trader may act.
+    blind_warmup_sessions: int = 10
     enabled_rules: tuple[str, ...] | None = None
 
     # Data acquisition (used by the Django service; kept here so the config hash
@@ -89,6 +96,10 @@ class AnalysisConfig:
             raise ValueError("stop_pct must be > 0")
         if self.max_hold_days <= 0:
             raise ValueError("max_hold_days must be > 0")
+        if self.runup_cutoff_mode not in {"auto", "fixed"}:
+            raise ValueError("runup_cutoff_mode must be 'auto' or 'fixed'")
+        if self.blind_warmup_sessions < 1:
+            raise ValueError("blind_warmup_sessions must be >= 1")
         if self.stop_mode not in {"fixed", "episode_low"}:
             raise ValueError("stop_mode must be 'fixed' or 'episode_low'")
         if self.stop_buffer_pct < 0:
@@ -209,7 +220,8 @@ def config_schema() -> dict[str, Any]:
                     {"key": "dip_threshold_pct", "label": "Dip threshold %", "type": "number", "min": 1, "max": 30, "step": 0.5},
                     {"key": "dip_lookback_days", "label": "Dip lookback (days)", "type": "number", "min": 0.25, "max": 10, "step": 0.25},
                     {"key": "fast_horizon_minutes", "label": "Fast horizon (minutes)", "type": "number", "min": 15, "max": 390, "step": 15},
-                    {"key": "max_runup_from_low_pct", "label": "Max run-up from low %", "type": "number", "min": 0.5, "max": 15, "step": 0.5},
+                    {"key": "runup_cutoff_mode", "label": "Bounce cutoff", "type": "select", "options": ["auto", "fixed"]},
+                    {"key": "max_runup_from_low_pct", "label": "Fixed / fallback cutoff %", "type": "number", "min": 0.5, "max": 15, "step": 0.5},
                 ],
             },
             {

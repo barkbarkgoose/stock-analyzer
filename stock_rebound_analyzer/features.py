@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from .bars import normalize_bars
@@ -49,10 +49,18 @@ class _EpisodeState:
     failed_bounces_1pct: int = 0
     last_new_low_index: int = 0
     max_bounce_pct: float = 0.0
+    bounce_pcts: list[float] = field(default_factory=list)
 
     @property
     def attempt_number(self) -> int:
         return self.failed_bounces + 1
+
+
+def _closing_bounces(state: _EpisodeState) -> tuple[float, ...]:
+    """Failed bounce legs plus the final leg off the last low."""
+
+    final = (state.max_high_since_low / state.low - 1.0) * 100.0 if state.low else 0.0
+    return (*state.bounce_pcts, max(0.0, final))
 
 
 class _EpisodeTracker:
@@ -107,6 +115,7 @@ class _EpisodeTracker:
                 state.failed_bounces_1pct = 0
                 state.last_new_low_index = index
                 state.max_bounce_pct = 0.0
+                state.bounce_pcts = []
             return state
 
         # Update the best bounce from the current low before considering a new
@@ -124,6 +133,7 @@ class _EpisodeTracker:
             bounce_pct = (state.max_high_since_low / state.low - 1.0) * 100.0
             if bounce_pct >= cfg.attempt_min_pct:
                 state.failed_bounces += 1
+                state.bounce_pcts.append(bounce_pct)
             if bounce_pct >= 1.0:
                 state.failed_bounces_1pct += 1
             state.low = bar.low
@@ -155,6 +165,7 @@ class _EpisodeTracker:
                     recovered=recovered,
                     duration_bars=index - (state.start_index or index),
                     max_bounce_pct=state.max_bounce_pct,
+                    bounce_pcts=_closing_bounces(state),
                 )
             )
             state.active = False
@@ -555,6 +566,7 @@ def build_features(
                 recovered=False,
                 duration_bars=len(bars) - 1 - (state.start_index or 0),
                 max_bounce_pct=state.max_bounce_pct,
+                bounce_pcts=_closing_bounces(state),
             )
         )
 

@@ -5,9 +5,13 @@ a multi-leg dip episode is active, and most require evidence that the rebound
 has actually started: a higher low, a reclaim of a short EMA/VWAP, a close
 above the prior bar or a prior swing high, volume expansion, or an RSI reclaim.
 
-Rule definitions are intentionally simple and readable.  The profile compares
-them on identical entries/outcomes (same triple-barrier labels), so differences
-come from the signal timing rather than from labelling choices.
+Each rule is a list of named checks and fires only when all of them pass.  The
+names are what the UI shows as the live "buy checklist", so the checklist is
+always exactly the trigger rather than a separate approximation of it.
+
+The profile compares rules on identical entries/outcomes (same triple-barrier
+labels), so differences come from the signal timing rather than from labelling
+choices.
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ from typing import Callable
 from .config import AnalysisConfig
 from .types import SESSION_MINUTES, FeatureRow
 
+Check = tuple[str, Callable[[FeatureRow], bool]]
+
 
 @dataclass(frozen=True, slots=True)
 class SignalRule:
@@ -25,134 +31,63 @@ class SignalRule:
     name: str
     description: str
     family: str
-    evaluate: Callable[[FeatureRow, AnalysisConfig], bool]
+    # One plain-English sentence finishing "Buy when ...".
+    plain: str
+    checks: tuple[Check, ...] = ()
     supports_daily: bool = True
-    confirmations: tuple[str, ...] = ()
+
+    def evaluate(self, row: FeatureRow, cfg: AnalysisConfig | None = None) -> bool:
+        return all(test(row) for _, test in self.checks)
+
+    def checklist(self, row: FeatureRow) -> list[dict[str, object]]:
+        return [{"label": label, "ok": bool(test(row))} for label, test in self.checks]
+
+    @property
+    def confirmations(self) -> tuple[str, ...]:
+        return tuple(label for label, _ in self.checks)
 
 
-def _green_reclaim(row: FeatureRow) -> bool:
-    return (
-        row.green_bar
-        and row.close_above_prior_high
-        and row.volume_ratio20 >= 1.05
-    )
+# ---------------------------------------------------------------------------
+# Shared checks
+# ---------------------------------------------------------------------------
+
+GREEN_ABOVE_PRIOR_HIGH: Check = (
+    "Rising bar closes above the previous bar's high",
+    lambda r: bool(r.green_bar and r.close_above_prior_high),
+)
+GREEN_BAR: Check = ("Rising (green) bar", lambda r: bool(r.green_bar))
+ABOVE_PRIOR_HIGH: Check = (
+    "Closes above the previous bar's high",
+    lambda r: bool(r.close_above_prior_high),
+)
+HIGHER_LOW: Check = ("Higher low has formed", lambda r: bool(r.higher_low))
+NO_FRESH_LOW: Check = (
+    "No new low in the last 3 bars",
+    lambda r: not r.new_low_recent,
+)
+STRUCTURE_TURNED: Check = (
+    "Structure turned (higher low or close above the last peak)",
+    lambda r: bool(r.higher_low or r.close_above_prior_swing_high),
+)
 
 
-def _vwap_available(row: FeatureRow) -> bool:
-    return row.session_vwap is not None
+def _off_low(pct: float) -> Check:
+    return (f"At least {pct:g}% off the low", lambda r: r.runup_from_low_pct >= pct)
 
 
-def _structural_break(row: FeatureRow) -> bool:
-    return row.higher_low or row.close_above_prior_swing_high
+def _volume(ratio: float, label: str) -> Check:
+    return (label, lambda r: r.volume_ratio20 >= ratio)
 
 
-def _dip_close(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return True
-
-
-def _green_reclaim_rule(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return _green_reclaim(row)
-
-
-def _ema_reclaim_rule(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(row.ema9_cross_up and row.green_bar)
-
-
-def _vwap_reclaim_rule(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(row.vwap_cross_up and row.green_bar)
-
-
-def _higher_low_break_rule(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(
-        row.higher_low
-        and row.close_above_prior_swing_high
-        and row.runup_from_low_pct >= 0.3
-    )
-
-
-def _bounce_hold_rule(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(
-        row.runup_from_low_pct >= 0.6
-        and row.close_above_prior_high
-        and not row.new_low_recent
-    )
-
-
-def _rsi_reclaim_rule(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(
-        (row.rsi_cross_up_30 or row.rsi_cross_up_40)
-        and row.green_bar
-        and row.close_above_prior_high
-    )
-
-
-def _volume_reversal_rule(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(
-        row.volume_ratio20 >= 1.5
-        and row.green_bar
-        and row.close_above_prior_high
-        and row.runup_from_low_pct >= 0.3
-    )
-
-
-def _composite_balanced(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    components = 0
+def _balanced_votes(row: FeatureRow) -> int:
+    votes = 0
     if row.ema9 is not None:
-        components += int(
-            row.ema9_cross_up or (row.green_bar and row.close_above_ema9)
-        )
-    if _vwap_available(row):
-        components += int(row.vwap_cross_up or row.close_above_vwap)
-    components += int(row.green_bar and row.close_above_prior_high)
-    components += int(row.higher_low)
-    return bool(
-        components >= 2
-        and _structural_break(row)
-        and row.runup_from_low_pct >= 0.3
-        and not row.new_low_recent
-        and row.volume_ratio20 >= 1.0
-    )
-
-
-def _composite_conservative(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(
-        row.green_bar
-        and row.close_above_prior_high
-        and row.higher_low
-        and (row.close_above_ema9 or (row.session_vwap is not None and row.close_above_vwap))
-        and row.volume_ratio20 >= 1.0
-        and row.runup_from_low_pct >= 0.3
-    )
-
-
-def _second_attempt(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(
-        row.failed_bounces >= 1
-        and row.higher_low
-        and row.green_bar
-        and (row.close_above_prior_swing_high or row.close_above_prior_high)
-        and row.runup_from_low_pct >= 0.3
-    )
-
-
-def _second_attempt_soft(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(
-        row.failed_bounces_1pct >= 1
-        and row.green_bar
-        and row.close_above_prior_high
-        and row.runup_from_low_pct >= 0.4
-        and not row.new_low_recent
-    )
-
-
-def _deep_dip_reclaim(row: FeatureRow, cfg: AnalysisConfig) -> bool:
-    return bool(
-        row.episode_depth_pct >= 7.0
-        and row.green_bar
-        and row.close_above_prior_high
-        and _structural_break(row)
-        and row.runup_from_low_pct >= 0.3
-    )
+        votes += int(row.ema9_cross_up or (row.green_bar and row.close_above_ema9))
+    if row.session_vwap is not None:
+        votes += int(row.vwap_cross_up or row.close_above_vwap)
+    votes += int(row.green_bar and row.close_above_prior_high)
+    votes += int(row.higher_low)
+    return votes
 
 
 RULES: tuple[SignalRule, ...] = (
@@ -164,8 +99,8 @@ RULES: tuple[SignalRule, ...] = (
             "This is the naive baseline the confirmations must beat."
         ),
         family="baseline",
-        evaluate=_dip_close,
-        confirmations=(),
+        plain="any bar during the dip — no confirmation at all (yardstick only)",
+        checks=(),
     ),
     SignalRule(
         id="green_reclaim",
@@ -175,25 +110,34 @@ RULES: tuple[SignalRule, ...] = (
             "recent volume."
         ),
         family="single",
-        evaluate=_green_reclaim_rule,
-        confirmations=("green bar", "prior high reclaimed", "volume > 1.05x"),
+        plain="a rising bar closes above the previous bar's high on slightly above-normal volume",
+        checks=(
+            GREEN_ABOVE_PRIOR_HIGH,
+            _volume(1.05, "Volume at least 1.05× normal"),
+        ),
     ),
     SignalRule(
         id="ema_reclaim",
         name="9-EMA reclaim",
         description="Close crosses back above the 9-EMA on a green bar.",
         family="single",
-        evaluate=_ema_reclaim_rule,
-        confirmations=("green bar", "9-EMA reclaimed"),
+        plain="the price closes back above its short-term (9-bar) average on a rising bar",
+        checks=(
+            GREEN_BAR,
+            ("Crosses back above the 9-EMA", lambda r: bool(r.ema9_cross_up)),
+        ),
     ),
     SignalRule(
         id="vwap_reclaim",
         name="VWAP reclaim",
         description="Close crosses back above session VWAP on a green bar.",
         family="single",
-        evaluate=_vwap_reclaim_rule,
+        plain="the price closes back above today's average traded price (VWAP) on a rising bar",
         supports_daily=False,
-        confirmations=("green bar", "session VWAP reclaimed"),
+        checks=(
+            GREEN_BAR,
+            ("Crosses back above session VWAP", lambda r: bool(r.vwap_cross_up)),
+        ),
     ),
     SignalRule(
         id="higher_low_break",
@@ -203,8 +147,15 @@ RULES: tuple[SignalRule, ...] = (
             "high. This is the classic 'structure has turned' confirmation."
         ),
         family="structure",
-        evaluate=_higher_low_break_rule,
-        confirmations=("higher low", "prior swing high reclaimed", "0.3% off low"),
+        plain="the dip makes a higher low and then closes above its last bounce peak",
+        checks=(
+            HIGHER_LOW,
+            (
+                "Closes above the last bounce peak",
+                lambda r: bool(r.close_above_prior_swing_high),
+            ),
+            _off_low(0.3),
+        ),
     ),
     SignalRule(
         id="bounce_hold",
@@ -214,16 +165,22 @@ RULES: tuple[SignalRule, ...] = (
             "with no new low in the last three bars."
         ),
         family="structure",
-        evaluate=_bounce_hold_rule,
-        confirmations=("0.6% off low", "prior bar high reclaimed", "no fresh low"),
+        plain="the bounce is at least 0.6% off the low, closes above the previous bar's high, and hasn't made a new low for 3 bars",
+        checks=(_off_low(0.6), ABOVE_PRIOR_HIGH, NO_FRESH_LOW),
     ),
     SignalRule(
         id="rsi_reclaim",
         name="RSI reclaim",
         description="RSI(14) crosses up through 30 or 40 on a green reclaim bar.",
         family="momentum",
-        evaluate=_rsi_reclaim_rule,
-        confirmations=("RSI cross", "green bar", "prior high reclaimed"),
+        plain="momentum (RSI) turns back up out of oversold on a rising bar above the previous high",
+        checks=(
+            (
+                "RSI crosses up through 30 or 40",
+                lambda r: bool(r.rsi_cross_up_30 or r.rsi_cross_up_40),
+            ),
+            GREEN_ABOVE_PRIOR_HIGH,
+        ),
     ),
     SignalRule(
         id="volume_reversal",
@@ -233,8 +190,12 @@ RULES: tuple[SignalRule, ...] = (
             "least 0.3% off the low."
         ),
         family="momentum",
-        evaluate=_volume_reversal_rule,
-        confirmations=("volume > 1.5x", "green bar", "0.3% off low"),
+        plain="a rising bar on 1.5× normal volume closes above the previous high, at least 0.3% off the low",
+        checks=(
+            _volume(1.5, "Volume at least 1.5× normal"),
+            GREEN_ABOVE_PRIOR_HIGH,
+            _off_low(0.3),
+        ),
     ),
     SignalRule(
         id="composite_balanced",
@@ -244,12 +205,16 @@ RULES: tuple[SignalRule, ...] = (
             "reclaim, higher low. Requires a structural break and no fresh low."
         ),
         family="composite",
-        evaluate=_composite_balanced,
-        confirmations=(
-            "2 confirmations",
-            "structural break",
-            "0.3% off low",
-            "no fresh low",
+        plain="at least two turn signals agree, the structure has turned, and no new low has printed for 3 bars",
+        checks=(
+            (
+                "2+ of: rising bar above prior high, above 9-EMA, above VWAP, higher low",
+                lambda r: _balanced_votes(r) >= 2,
+            ),
+            STRUCTURE_TURNED,
+            _off_low(0.3),
+            NO_FRESH_LOW,
+            _volume(1.0, "Volume at least normal"),
         ),
     ),
     SignalRule(
@@ -260,12 +225,19 @@ RULES: tuple[SignalRule, ...] = (
             "least 0.3% off the low. Fewer trades, higher precision."
         ),
         family="composite",
-        evaluate=_composite_conservative,
-        confirmations=(
-            "green reclaim",
-            "higher low",
-            "EMA/VWAP reclaim",
-            "volume",
+        plain="a rising bar closes above the previous high, the low is higher than the last one, price is back above its short-term average or VWAP, and volume is normal or better",
+        checks=(
+            GREEN_ABOVE_PRIOR_HIGH,
+            HIGHER_LOW,
+            (
+                "Above the 9-EMA or session VWAP",
+                lambda r: bool(
+                    r.close_above_ema9
+                    or (r.session_vwap is not None and r.close_above_vwap)
+                ),
+            ),
+            _volume(1.0, "Volume at least normal"),
+            _off_low(0.3),
         ),
     ),
     SignalRule(
@@ -276,12 +248,18 @@ RULES: tuple[SignalRule, ...] = (
             "This is the explicit anti-fake-rebound rule."
         ),
         family="second_attempt",
-        evaluate=_second_attempt,
-        confirmations=(
-            "failed first bounce",
-            "higher low",
-            "green reclaim",
-            "0.3% off low",
+        plain="one bounce has already failed, then the price makes a higher low and closes above a recent high",
+        checks=(
+            ("A previous bounce already failed", lambda r: r.failed_bounces >= 1),
+            HIGHER_LOW,
+            GREEN_BAR,
+            (
+                "Closes above the last peak or the previous bar's high",
+                lambda r: bool(
+                    r.close_above_prior_swing_high or r.close_above_prior_high
+                ),
+            ),
+            _off_low(0.3),
         ),
     ),
     SignalRule(
@@ -292,11 +270,15 @@ RULES: tuple[SignalRule, ...] = (
             "high and 0.4% off the low."
         ),
         family="second_attempt",
-        evaluate=_second_attempt_soft,
-        confirmations=(
-            "failed 1% bounce",
-            "green bar",
-            "prior high reclaimed",
+        plain="a 1%+ bounce has already failed, then a rising bar closes above the previous high without a fresh low",
+        checks=(
+            (
+                "A previous 1%+ bounce already failed",
+                lambda r: r.failed_bounces_1pct >= 1,
+            ),
+            GREEN_ABOVE_PRIOR_HIGH,
+            _off_low(0.4),
+            NO_FRESH_LOW,
         ),
     ),
     SignalRule(
@@ -307,8 +289,13 @@ RULES: tuple[SignalRule, ...] = (
             "structural break."
         ),
         family="deep_dip",
-        evaluate=_deep_dip_reclaim,
-        confirmations=("dip >= 7%", "green reclaim", "structural break"),
+        plain="the dip is at least 7% deep and a rising bar closes above the previous high with the structure turning",
+        checks=(
+            ("Dip is at least 7% deep", lambda r: r.episode_depth_pct >= 7.0),
+            GREEN_ABOVE_PRIOR_HIGH,
+            STRUCTURE_TURNED,
+            _off_low(0.3),
+        ),
     ),
 )
 
@@ -325,26 +312,93 @@ def available_rules(config: AnalysisConfig) -> list[SignalRule]:
     return rules
 
 
-def is_candidate_bar(row: FeatureRow, config: AnalysisConfig) -> bool:
+# ---------------------------------------------------------------------------
+# Watch window (filters shared by every rule)
+# ---------------------------------------------------------------------------
+
+
+def in_dip(row: FeatureRow, config: AnalysisConfig) -> bool:
+    return bool(
+        row.episode_active
+        and row.episode_depth_pct + 1e-9 >= config.dip_threshold_pct
+    )
+
+
+def bounce_room_left(row: FeatureRow, cutoff_pct: float) -> bool:
+    # Measured from the episode's own low, not a rolling window, so a dip that
+    # drifts sideways for days does not quietly re-arm the watch.
+    return row.episode_recovery_pct <= cutoff_pct + 1e-9
+
+
+def in_trading_window(row: FeatureRow, config: AnalysisConfig) -> bool:
+    if not config.is_intraday:
+        return True
+    minutes = row.minutes_since_open
+    return (
+        minutes >= config.exclude_first_minutes
+        and minutes <= SESSION_MINUTES - config.exclude_last_minutes
+    )
+
+
+def trend_ok(row: FeatureRow, config: AnalysisConfig) -> bool:
+    return not (
+        config.only_uptrend_signals
+        and row.daily_trend_score < config.uptrend_min_score
+    )
+
+
+def base_candidate(row: FeatureRow, config: AnalysisConfig) -> bool:
+    """Every candidate filter except the bounce cutoff."""
+
+    return (
+        in_dip(row, config)
+        and in_trading_window(row, config)
+        and trend_ok(row, config)
+    )
+
+
+def is_candidate_bar(
+    row: FeatureRow, config: AnalysisConfig, cutoff_pct: float | None = None
+) -> bool:
     """Filters that apply to every rule's evaluation."""
 
-    if not row.episode_active:
-        return False
-    if row.episode_depth_pct + 1e-9 < config.dip_threshold_pct:
-        return False
-    if row.runup_from_low_pct > config.max_runup_from_low_pct + 1e-9:
-        # The easy part of the rebound is already gone.  A 1% target from here
-        # would require a near-full recovery of the dip.
-        return False
+    cutoff = config.max_runup_from_low_pct if cutoff_pct is None else cutoff_pct
+    return base_candidate(row, config) and bounce_room_left(row, cutoff)
+
+
+def watch_checklist(row: FeatureRow, config: AnalysisConfig) -> list[dict[str, object]]:
+    items = [
+        {
+            "label": f"Down at least {config.dip_threshold_pct:g}% from the recent high",
+            "ok": in_dip(row, config),
+        },
+        {
+            "label": (
+                f"Bounce room left (no more than {config.max_runup_from_low_pct:.2f}% "
+                "off the dip low)"
+            ),
+            "ok": bool(row.episode_active)
+            and bounce_room_left(row, config.max_runup_from_low_pct),
+        },
+    ]
     if config.is_intraday:
-        minutes = row.minutes_since_open
-        if minutes < config.exclude_first_minutes:
-            return False
-        if minutes > SESSION_MINUTES - config.exclude_last_minutes:
-            return False
-    if config.only_uptrend_signals and row.daily_trend_score < config.uptrend_min_score:
-        return False
-    return True
+        items.append(
+            {
+                "label": (
+                    f"Not the first {config.exclude_first_minutes} or last "
+                    f"{config.exclude_last_minutes} minutes of the session"
+                ),
+                "ok": in_trading_window(row, config),
+            }
+        )
+    if config.only_uptrend_signals:
+        items.append(
+            {
+                "label": f"Daily uptrend score at least {config.uptrend_min_score:g}",
+                "ok": trend_ok(row, config),
+            }
+        )
+    return items
 
 
 def evaluates(

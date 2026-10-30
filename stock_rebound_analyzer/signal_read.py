@@ -8,7 +8,15 @@ from typing import Any, Sequence
 from .config import AnalysisConfig
 from .labels import stop_price_for
 from .model import predict_probability
-from .rules import SignalRule, evaluates, is_candidate_bar
+from .rules import (
+    SignalRule,
+    bounce_room_left,
+    evaluates,
+    in_dip,
+    trend_ok,
+    is_candidate_bar,
+    watch_checklist,
+)
 from .types import FeatureRow
 
 
@@ -16,23 +24,27 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat()
 
 
-def _waiting_for(row: FeatureRow, config: AnalysisConfig) -> list[str]:
+def _waiting_for(
+    row: FeatureRow,
+    config: AnalysisConfig,
+    watch: list[dict[str, Any]],
+    buy: list[dict[str, Any]],
+    rule: SignalRule | None,
+) -> list[str]:
     if not row.episode_active:
-        return [f"a >= {config.dip_threshold_pct:.1f}% dip episode"]
-    if row.runup_from_low_pct > config.max_runup_from_low_pct:
-        return ["a fresh pullback; the rebound is already extended"]
-    waiting: list[str] = []
-    if not row.higher_low:
-        waiting.append("a confirmed higher low")
-    if not row.close_above_prior_high:
-        waiting.append("a close above the prior bar high")
-    if row.ema9 is not None and not row.close_above_ema9:
-        waiting.append("reclaim of the 9-EMA")
-    if row.session_vwap is not None and not row.close_above_vwap:
-        waiting.append("reclaim of session VWAP")
-    if row.failed_bounces_1pct == 0:
-        waiting.append("a failed first bounce or a structural break")
-    return waiting or ["confirmation already present"]
+        return [f"a dip of at least {config.dip_threshold_pct:g}% from the recent high"]
+    if not bounce_room_left(row, config.max_runup_from_low_pct):
+        return [
+            "a fresh pullback — this bounce is already "
+            f"{row.episode_recovery_pct:.2f}% off the low, past the "
+            f"{config.max_runup_from_low_pct:.2f}% cutoff"
+        ]
+    waiting = [str(item["label"]) for item in watch if not item["ok"]]
+    if rule is None:
+        waiting.append("a buy rule with a net-positive track record on this stock (none yet)")
+    else:
+        waiting.extend(str(item["label"]) for item in buy if not item["ok"])
+    return waiting or ["nothing — the buy rule is firing"]
 
 
 def _fake_rebound_risk(row: FeatureRow, probability: float | None) -> dict[str, Any]:
@@ -93,15 +105,32 @@ def build_signal_read(
     stop = stop_price_for(entry_estimate, row, config)
     target = entry_estimate * (1.0 + config.target_pct / 100.0)
 
+    watch = watch_checklist(row, config)
+    buy = recommended_rule.checklist(row) if recommended_rule else []
     if recommended_fire:
         state = "signal"
         detail = f"{recommended_rule.name} is firing on the latest bar."  # type: ignore[union-attr]
-    elif candidate:
+    elif (
+        in_dip(row, config)
+        and trend_ok(row, config)
+        and bounce_room_left(row, config.max_runup_from_low_pct)
+    ):
         state = "watching"
-        detail = "A dip episode is active, but the confirmation has not triggered."
+        if not recommended_rule:
+            detail = "In a dip with bounce room left, but no buy rule has earned trust on this stock yet."
+        elif not candidate:
+            detail = "In a dip with bounce room left, but outside the trading window for this time of day."
+        else:
+            detail = "In a dip with bounce room left. Waiting for the buy rule to confirm the turn."
+    elif row.episode_active and not bounce_room_left(row, config.max_runup_from_low_pct):
+        state = "extended"
+        detail = (
+            "Still in the dip, but this bounce has already used up its typical room. "
+            "Waiting for a pullback."
+        )
     else:
         state = "no_setup"
-        detail = "No qualifying dip setup on the latest bar."
+        detail = "Not in a qualifying dip right now."
 
     return {
         "state": state,
@@ -113,6 +142,9 @@ def build_signal_read(
         "episode_depth_pct": row.episode_depth_pct,
         "episode_recovery_pct": row.episode_recovery_pct,
         "runup_from_low_pct": row.runup_from_low_pct,
+        "off_low_pct": row.episode_recovery_pct,
+        "cutoff_pct": config.max_runup_from_low_pct,
+        "cutoff_mode": config.runup_cutoff_mode,
         "bars_since_episode_low": row.bars_since_episode_low,
         "attempt_number": row.attempt_number,
         "failed_bounces": row.failed_bounces,
@@ -134,6 +166,10 @@ def build_signal_read(
             for rule in fired
         ],
         "recommended_fire": recommended_fire,
+        "recommended_rule_id": recommended_rule.id if recommended_rule else None,
+        "recommended_rule_name": recommended_rule.name if recommended_rule else None,
+        "watch_checklist": watch,
+        "buy_checklist": buy,
         "probability": probability,
         "probability_fast": probability_fast,
         "levels": {
@@ -143,7 +179,7 @@ def build_signal_read(
             "target_pct": config.target_pct,
             "stop_pct": (1.0 - stop / entry_estimate) * 100.0 if entry_estimate else 0.0,
         },
-        "waiting_for": _waiting_for(row, config),
+        "waiting_for": _waiting_for(row, config, watch, buy, recommended_rule),
         "fake_rebound_risk": _fake_rebound_risk(row, probability),
     }
 

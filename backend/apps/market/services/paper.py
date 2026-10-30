@@ -157,7 +157,9 @@ def paper_tick(
                 continue
         profile_config = AnalysisConfig.from_dict(profile.get("config"))
         context = get_recommended_context(symbol, source=source)
-        recommended_rule_id = context.get("recommended_rule_id") or "composite_balanced"
+        # None when the profile found no rule worth trusting: the read can then
+        # still watch, but never opens a trade.
+        recommended_rule_id = context.get("recommended_rule_id")
 
         try:
             refresh_latest(symbol, profile_config, source=source)

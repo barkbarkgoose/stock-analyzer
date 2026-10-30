@@ -54,14 +54,11 @@ def build_live_read(
         analysis_bars, config, daily_context=contexts, symbol=symbol
     )
     rules = available_rules(config)
-    recommended = None
-    if recommended_rule_id:
-        recommended = RULE_BY_ID.get(recommended_rule_id)
-    if recommended is None or recommended not in rules:
-        recommended = next(
-            (rule for rule in rules if rule.id == "composite_balanced"),
-            next((rule for rule in rules if rule.id != "dip_close"), None),
-        )
+    # No fallback rule: if the profile found no rule worth trusting, the live
+    # read can still say "watching", but it never says "signal".
+    recommended = RULE_BY_ID.get(recommended_rule_id) if recommended_rule_id else None
+    if recommended is not None and recommended not in rules:
+        recommended = None
     read = build_signal_read(
         series.rows,
         rules,

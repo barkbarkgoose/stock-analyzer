@@ -290,6 +290,9 @@ class EpisodeRecord:
     recovered: bool
     duration_bars: int
     max_bounce_pct: float
+    # Every bounce leg in the episode, in %, measured from the low it started
+    # at: each failed bounce (>= attempt_min_pct) plus the final leg.
+    bounce_pcts: tuple[float, ...] = ()
 
 
 @dataclass(slots=True)

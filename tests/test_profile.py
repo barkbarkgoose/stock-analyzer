@@ -38,7 +38,7 @@ def test_profile_end_to_end() -> None:
     assert profile["recommended"] is not None
     assert profile["recommended"]["stats"]["trades"] >= 0
     assert profile["episode_summary"]["count"] >= 0
-    assert profile["signal_read"]["state"] in {"signal", "watching", "no_setup"}
+    assert profile["signal_read"]["state"] in {"signal", "watching", "extended", "no_setup"}
     assert isinstance(profile["warnings"], list)
 
     # The model needs numpy/sklearn. It is part of the backend requirements.
